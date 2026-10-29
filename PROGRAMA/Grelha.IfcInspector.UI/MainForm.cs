@@ -41,9 +41,9 @@ internal sealed class MainForm : Form
         var logDirectory = Environment.GetEnvironmentVariable("GRELHA_LOG_DIR") ?? (bundledReader is null ? Path.GetFullPath(Path.Combine(projectRoot, "..", "logs")) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Dimensionador Tipo Grelha", "logs"));
         Directory.CreateDirectory(logDirectory);
         lastLogPath = Path.Combine(logDirectory, $"Grelha_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Environment.ProcessId}.log");
-        File.WriteAllText(lastLogPath, $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} Programa iniciado. Versão 0.35.{Environment.NewLine}", Encoding.UTF8);
+        File.WriteAllText(lastLogPath, $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} Programa iniciado. Versão 0.36.{Environment.NewLine}", Encoding.UTF8);
 
-        Text = "Dimensionador Tipo Grelha 0.35";
+        Text = "Dimensionador Tipo Grelha 0.36";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(980, 430);
         ClientSize = new Size(980, 558);
@@ -58,7 +58,7 @@ internal sealed class MainForm : Form
         };
         var subtitle = new Label
         {
-            Text = "Leitura, conectividade e dimensionamento de redes de sprinklers · versão 0.35",
+            Text = "Leitura, conectividade e dimensionamento de redes de sprinklers · versão 0.36",
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
             Location = new Point(26, 52)

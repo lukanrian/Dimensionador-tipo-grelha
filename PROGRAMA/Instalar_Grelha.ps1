@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$version = '0.35'
+$version = '0.36'
 $publishRoot = Join-Path $root "dist\win-x64\$version"
 $installDir = Join-Path $env:LOCALAPPDATA "Programs\Dimensionador Tipo Grelha\$version"
 $uiProject = Join-Path $root 'Grelha.IfcInspector.UI\Grelha.IfcInspector.UI.csproj'

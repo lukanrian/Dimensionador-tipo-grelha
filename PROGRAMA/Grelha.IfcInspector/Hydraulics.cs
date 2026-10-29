@@ -464,6 +464,10 @@ internal static class Hydraulics
                 if (--degree[other] <= 1 && !keep.Contains(other) && !removedNode[other]) prune.Push(other);
             }
         }
+        var unconnectedInArea = Enumerable.Range(0, deviceBase).Count(end => !removedPipe[end / 2]
+            && pointsInNode[unionFind.Find(end)] == 1);
+        if (unconnectedInArea > 0)
+            warnings.Add($"{unconnectedInArea} extremidade(s) de tubo sem conexão geométrica na rede hidráulica calculada; confira em Montagem da rede se são finais intencionais ou conexões ausentes.");
         double PipeResistance(int pipe) => Resistance(pipes[pipe].Length_m + equivalent[pipe], pipes[pipe].InnerDiameter_m, pipes[pipe].C);
 
         var junctions = Enumerable.Range(0, nodeCount).Where(node => !removedNode[node] && (degree[node] != 2 || keep.Contains(node))).ToList();
@@ -751,9 +755,11 @@ internal static class Hydraulics
 
     // Gradiente conjugado com pré-condicionador diagonal para a matriz simétrica positiva definida do método do gradiente global.
     // Parte da solução anterior (as iterações de Newton mudam pouco de uma para a outra).
-    static double[] ConjugateGradient(double[] diagonal, List<(int A, int B, double W)> pairs, double[] rhs, double[] start)
+    static double[] ConjugateGradient(double[] diagonal, List<(int A, int B, double W)> pairs, double[] rhs, double[] start, int? iterationLimit = null)
     {
         var n = rhs.Length;
+        var maxIterations = iterationLimit ?? 20 * n + 100;
+        if (maxIterations < 0) throw new ArgumentOutOfRangeException(nameof(iterationLimit));
         if (diagonal.Any(value => value <= 0)) throw new InvalidDataException("Sistema hidráulico singular: há trecho sem caminho até a alimentação.");
         void Multiply(double[] x, double[] y)
         {
@@ -769,7 +775,7 @@ internal static class Hydraulics
         var product = new double[n];
         var rz = Dot(residual, z);
         var limit = 1e-26 * Math.Max(Dot(rhs, rhs), 1e-30);
-        for (var iteration = 0; iteration < 20 * n + 100 && Dot(residual, residual) > limit; iteration++)
+        for (var iteration = 0; iteration < maxIterations && Dot(residual, residual) > limit; iteration++)
         {
             Multiply(direction, product);
             var curvature = Dot(direction, product);
@@ -787,8 +793,8 @@ internal static class Hydraulics
         double trueResidual = 0;
         for (var i = 0; i < n; i++) trueResidual += (rhs[i] - product[i]) * (rhs[i] - product[i]);
         var relative = Math.Sqrt(trueResidual / Math.Max(Dot(rhs, rhs), 1e-30));
-        if (relative > 1e-9)
-            throw new InvalidDataException($"O solucionador linear não convergiu (resíduo relativo {relative:0.0e+0} após {20 * n + 100} iterações no máximo); a rede pode estar mal condicionada.");
+        if (!double.IsFinite(relative) || relative > 1e-9)
+            throw new InvalidDataException($"O solucionador linear não convergiu (resíduo relativo {relative:0.0e+0} após {maxIterations} iterações no máximo); a rede pode estar mal condicionada.");
         return x;
     }
 
@@ -797,6 +803,15 @@ internal static class Hydraulics
     public static IEnumerable<string> SolverSelfTest(int[] sides)
     {
         var random = new Random(10897);
+        var rejectedNonFinite = false;
+        try { _ = ConjugateGradient([1.0], [], [double.NaN], [0.0]); }
+        catch (InvalidDataException error) when (error.Message.StartsWith("O solucionador linear não convergiu", StringComparison.Ordinal)) { rejectedNonFinite = true; }
+        if (!rejectedNonFinite) throw new InvalidDataException("Autoteste falhou: o solver aceitou resíduo não finito.");
+        var rejectedUnconverged = false;
+        try { _ = ConjugateGradient([1.0], [], [1.0], [0.0], 0); }
+        catch (InvalidDataException error) when (error.Message.StartsWith("O solucionador linear não convergiu", StringComparison.Ordinal)) { rejectedUnconverged = true; }
+        if (!rejectedUnconverged) throw new InvalidDataException("Autoteste falhou: o solver aceitou a solução antes de convergir.");
+        yield return "Falhas por resíduo não finito e por limite de iterações são rejeitadas.";
         foreach (var side in sides)
         {
             var n = side * side;

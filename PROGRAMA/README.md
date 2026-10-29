@@ -1,4 +1,4 @@
-# Dimensionador Tipo Grelha 0.35
+# Dimensionador Tipo Grelha 0.36
 
 ## Organização das pastas
 
@@ -155,9 +155,15 @@ O 3D usa a biblioteca camera-controls 2.9.0 (MIT, em `Web/lib`) com a mesma conf
 - **Solucionador esparso:** o sistema de cada iteração é resolvido por gradiente conjugado com matriz esparsa; acabou o limite de
   4.000 nós da matriz densa. No IFC modelo o resultado é o mesmo da versão anterior (17,27 L/s; 53,06 m).
 
-## Convergência garantida do solucionador (0.35)
+## Convergência garantida do solucionador (0.36)
 
 - O gradiente conjugado confere o resíduo verdadeiro (b − A·x) no fim; acima de 1e-9 (relativo) o cálculo para com erro,
   em vez de aceitar uma solução incompleta.
+- Resíduos não finitos e esgotamento forçado do limite de iterações são rejeitados pelo autoteste.
 - Autoteste: `Grelha.IfcInspector.exe --teste-solucionador` monta grelhas de 100 a 90.000 nós com resistências variadas,
   mede o tempo e compara com o Cholesky denso até 2.500 nós.
+- As extremidades de tubo sem conexão geométrica no componente que alimenta a área passam a aparecer nos avisos do cálculo e do memorial; valide-as em
+  "Montagem da rede" para distinguir fim de linha intencional de conexão ausente.
+- A execução de referência atual foi comparada ao memorial PDF existente: a pressão mínima coincidiu (6,34 m.c.a.),
+  mas a vazão calculada (17,27 L/s) difere da vazão de referência (16,63 L/s) e a altura requerida (53,06 m) difere
+  da altura publicada (57,28 m). Portanto, o cálculo ainda exige revisão da topologia e dos critérios antes de uso de projeto.
