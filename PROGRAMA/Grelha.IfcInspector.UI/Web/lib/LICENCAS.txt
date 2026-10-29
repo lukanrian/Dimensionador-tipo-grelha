@@ -1,0 +1,3 @@
+web-ifc 0.0.66 (ThatOpen Company) - Mozilla Public License 2.0 - https://github.com/ThatOpen/engine_web-ifc
+three.js 0.170.0 - MIT (three-LICENSE.txt)
+camera-controls 2.9.0 (yomotsu) - MIT

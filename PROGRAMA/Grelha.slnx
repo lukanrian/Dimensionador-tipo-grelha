@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Grelha.IfcInspector.UI/Grelha.IfcInspector.UI.csproj" />
+  <Project Path="Grelha.IfcInspector/Grelha.IfcInspector.csproj" />
+</Solution>

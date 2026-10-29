@@ -1,0 +1,25 @@
+# Compilação e saídas
+dist/
+bin/
+obj/
+*.user
+.vs/
+logs/
+tmp/
+graphify-out/
+
+# Material de terceiros e do cliente: não sobe ao GitHub
+/NORMAS/
+/CATALOGO/
+/IFC/
+/PROJETO MODELO/
+/VISOR/
+*.ifc
+*.pdf
+*.inventory.json
+
+# Relatórios internos de atualização
+/RELATORIOS/
+*.docx
+
+.claude/

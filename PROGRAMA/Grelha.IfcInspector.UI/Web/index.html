@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Dimensionador Tipo Grelha</title>
+<link rel="stylesheet" href="app.css">
+<script type="importmap">{ "imports": { "three": "./lib/three.module.min.js" } }</script>
+<script type="module" src="app.js"></script>
+</head>
+<body>
+<div id="app">
+  <header class="topo">
+    <div class="marca">
+      <svg width="26" height="26" viewBox="0 0 28 28" fill="none" stroke="var(--acento)" stroke-width="2"><path d="M4 9h20M4 19h20M9 4v20M19 4v20"/><circle cx="9" cy="9" r="2.2" fill="var(--acento)"/><circle cx="19" cy="19" r="2.2" fill="var(--acento)"/></svg>
+      <div><b>Dimensionador Tipo Grelha</b><span id="versao">sprinklers · cálculo + bomba + memorial</span></div>
+    </div>
+    <span id="arquivo" class="arquivo"></span>
+    <span class="espaco"></span>
+    <button class="btn" id="btnAbrir">Abrir IFC</button>
+    <button class="btn primario" id="btnAnalisar">Analisar</button>
+    <button class="btn" id="btnBomba">Selecionar bomba</button>
+    <button class="btn primario" id="btnMemorial">Gerar memorial</button>
+    <div class="menu">
+      <button class="btn" id="btnArquivos">Arquivos ▾</button>
+      <div class="pop" id="popArquivos" hidden>
+        <button data-abrir="memorial">Último memorial de cálculo</button>
+        <button data-abrir="selection">Seleção de bombas (CSV)</button>
+        <button data-abrir="segments">Planilha por trecho (CSV)</button>
+        <button data-abrir="sprinklers">Resultados por bico (CSV)</button>
+        <button data-abrir="pipes">Resultados por tubo (CSV)</button>
+        <button data-abrir="inventory">Inventário (JSON)</button>
+        <button data-abrir="pumpcurve">Curva da bomba (CSV)</button>
+        <button data-abrir="folder">Pasta do IFC</button>
+        <button data-abrir="log">Log</button>
+      </div>
+    </div>
+    <button class="btn icone" id="btnTema" title="Tema claro/escuro">☾</button>
+  </header>
+
+  <div class="corpo">
+    <aside class="lateral">
+      <section class="painel abas-painel">
+        <nav class="abas">
+          <button class="ativa" data-aba="projeto">Projeto</button>
+          <button data-aba="bicos">Bicos</button>
+          <button data-aba="bombas">Bombas</button>
+        </nav>
+        <div class="aba" id="aba-projeto">
+          <label class="campo">Tubo de alimentação (GlobalId, opcional)<input id="alimentacao" placeholder="automático: bomba do IFC"></label>
+          <label class="campo">Nível do reservatório acima da tomada (m)<input id="nivel" value="0"></label>
+          <button class="btn mini" id="btnCurva">Curva da bomba (CSV)…</button>
+          <table class="kv"><tr><th colspan="2">Área de operação</th></tr></table>
+          <div class="opcoes">
+            <label><input type="radio" name="origemArea" value="memorial" checked> Do memorial (PDF ao lado do IFC)</label>
+            <label><input type="radio" name="origemArea" value="2d"> Escolhida no 2D</label>
+          </div>
+          <div id="areaManual" hidden>
+            <p class="vazio" id="areaInfo">Na vista 2D, use "Selecionar área" e arraste sobre os bicos.</p>
+            <div class="duas">
+              <label class="campo">Densidade (mm/min)<input id="aDensidade" value="6,1"></label>
+              <label class="campo">Área de aplicação (m²)<input id="aArea" value="140"></label>
+              <label class="campo">Fator K (L/min/bar½)<input id="aK" value="80"></label>
+              <label class="campo">Pressão mínima (m.c.a., opcional)<input id="aPressao" value=""></label>
+              <label class="campo">Área por bico (m², opcional)<input id="aPorBico" value="" placeholder="pelo espaçamento"></label>
+            </div>
+            <label class="campo">Classificação de risco<select id="aRisco"><option>risco leve</option><option selected>risco ordinário grupo I</option><option>risco ordinário grupo II</option><option>risco extraordinário grupo I</option><option>risco extraordinário grupo II</option></select></label>
+            <div id="areaForma"></div>
+            <button class="btn primario" id="btnCalcArea" disabled>Calcular com a área escolhida</button>
+            <button class="btn" id="btnAutoArea" style="width:100%;margin-top:6px">Sugerir a área mais desfavorável</button>
+            <div id="candidatas"></div>
+          </div>
+          <div id="resumo" class="resumo"><p class="vazio">Abra um IFC e clique em Analisar.</p></div>
+        </div>
+        <div class="aba" id="aba-bicos" hidden><div id="listaBicos"></div></div>
+        <div class="aba" id="aba-bombas" hidden><div id="listaBombas"></div></div>
+      </section>
+      <section class="painel props">
+        <div class="titulo-painel"><b>Propriedades</b><button class="btn mini" id="btnLimpar">Limpar seleção</button></div>
+        <div id="propriedades"><p class="vazio">Clique num elemento da rede.</p></div>
+      </section>
+    </aside>
+
+    <main class="area3d">
+      <div class="ferramentas">
+        <button class="btn" id="btnEnquadrar">Enquadrar</button>
+        <button class="btn" id="btnAproximar">Aproximar seleção</button>
+        <button class="btn" id="btnArea">Área de operação</button>
+        <span class="grupo"><span class="rotulo">Vista</span><button class="btn ativo" data-vista="iso">3D</button><button class="btn" data-vista="topo">Topo</button><button class="btn" data-vista="2d">2D</button></span>
+        <span class="grupo" id="grupo2d" hidden><span class="rotulo">Pavimento</span><select id="pavimento"></select>
+          <button class="btn" id="btnSelArea" title="Arraste um retângulo sobre os bicos. Shift soma, Ctrl retira; clique alterna um bico.">Selecionar área</button>
+          <button class="btn" id="btnLimparArea">Limpar</button></span>
+        <span class="grupo"><span class="rotulo">Colorir</span>
+          <select id="colorir">
+            <option value="situacao">Situação do cálculo</option>
+            <option value="vazao">Vazão (L/s)</option>
+            <option value="velocidade">Velocidade (m/s)</option>
+            <option value="diametro">Diâmetro (mm)</option>
+          </select></span>
+        <div class="menu">
+          <button class="btn" id="btnMostrar">Mostrar ▾</button>
+          <div class="pop" id="popMostrar" hidden>
+            <label><input type="checkbox" id="vConexoes"> Conexões</label>
+            <label><input type="checkbox" id="vValvulas" checked> Válvulas e bombas</label>
+            <label><input type="checkbox" id="vBicos" checked> Bicos fora da área</label>
+            <label><input type="checkbox" id="vSemVazao" checked> Tubos sem vazão</label>
+            <label><input type="checkbox" id="vReal"> Diâmetro real (sem ampliar)</label>
+            <label><input type="checkbox" id="vRotulos" checked> Números dos bicos</label>
+          </div>
+        </div>
+      </div>
+      <div id="viewport"></div>
+      <div id="rotulos"></div>
+      <div id="legenda" class="legenda" hidden></div>
+      <div class="dica">Esquerdo: orbitar · Roda pressionada: mover · Roda: zoom no cursor · Clique: selecionar e centrar a órbita · Duplo clique: aproximar · Direito: menu · H oculta · I isola · M mostra tudo · F enquadra · Esc limpa</div>
+      <div id="vazio3d" class="vazio3d">A rede aparece aqui depois da análise do IFC.</div>
+    </main>
+  </div>
+
+  <footer class="rodape">
+    <span id="status">Pronto.</span>
+    <span class="espaco"></span>
+    <button class="btn mini" id="btnSaida">Saída ▴</button>
+  </footer>
+  <pre id="saida" class="saida" hidden></pre>
+  <div id="ocupado" class="ocupado" hidden><div><div class="giro"></div><span id="ocupadoTxt">Processando…</span></div></div>
+</div>
+</body>
+</html>

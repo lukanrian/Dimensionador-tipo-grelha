@@ -1,0 +1,18 @@
+# Bibliotecas de terceiros e arquivos gerados (não descrevem o projeto)
+PROGRAMA/Grelha.IfcInspector.UI/Web/lib/
+PROGRAMA/dist/
+PROGRAMA/Catalogo/
+IFC/
+tmp/
+logs/
+dist/
+.claude/
+RELATORIOS/
+# PDFs do catálogo e das pranchas: fora do grafo (normas incluídas)
+
+CATALOGO/
+PROJETO MODELO/
+# Visor: só o código-fonte (o compilado e o wasm ficam fora)
+VISOR/visor-base/csharp/visor/
+VISOR/visor-base/web/node_modules/
+VISOR/visor-base/web/package-lock.json

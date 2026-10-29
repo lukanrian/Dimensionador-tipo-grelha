@@ -1,0 +1,75 @@
+:root { --fundo:#eef1f5; --painel:#fff; --elevado:#f3f5f8; --borda:#d5dae1; --borda-forte:#b9c1cc; --texto:#1b2430; --suave:#4d5866; --fraco:#6b7582;
+  --acento:#e8711f; --acento-txt:#fff; --ok:#17804f; --aviso:#a85a12; --erro:#c23434; --campo:#fff; --fundo3d:#f4f6f9; color-scheme:light; }
+:root[data-tema=escuro] { --fundo:#101318; --painel:#171b21; --elevado:#1e232b; --borda:#2a3039; --borda-forte:#3a424e; --texto:#e7eaee; --suave:#a0a8b4;
+  --fraco:#7d8693; --acento:#ff8a3d; --acento-txt:#1a1206; --ok:#68d6a2; --aviso:#ffb27a; --erro:#ff8f8f; --campo:#101318; --fundo3d:#1a1e25; color-scheme:dark; }
+* { box-sizing:border-box } [hidden] { display:none !important }
+html, body { margin:0; height:100%; background:var(--fundo); color:var(--texto); font:14px/1.4 "Segoe UI", system-ui, sans-serif }
+#app { height:100vh; display:flex; flex-direction:column }
+button { font:inherit; cursor:pointer }
+.topo { display:flex; align-items:center; gap:10px; padding:10px 14px; background:var(--painel); border-bottom:1px solid var(--borda) }
+.marca { display:flex; align-items:center; gap:10px } .marca div { display:flex; flex-direction:column } .marca span { color:var(--suave); font-size:12px }
+.arquivo { color:var(--suave); font-size:13px; max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; margin-left:12px }
+.espaco { flex:1 }
+.btn { height:34px; padding:0 12px; border:1px solid var(--borda); border-radius:6px; background:var(--elevado); color:var(--texto) }
+.btn:hover { border-color:var(--borda-forte) } .btn:disabled { opacity:.45; cursor:default }
+.btn.primario { background:var(--acento); color:var(--acento-txt); border:0; font-weight:600 }
+.btn.mini { height:28px; padding:0 8px; font-size:12px; color:var(--suave); background:transparent }
+.btn.icone { width:38px; padding:0 }
+.btn.ativo { border-color:var(--acento); color:var(--acento) }
+.menu { position:relative }
+.pop { position:absolute; right:0; top:38px; z-index:20; min-width:240px; padding:6px; background:var(--painel); border:1px solid var(--borda); border-radius:8px; box-shadow:0 8px 24px #0002; display:flex; flex-direction:column }
+.pop button { text-align:left; padding:7px 10px; border:0; background:transparent; color:var(--texto); border-radius:5px } .pop button:hover { background:var(--elevado) }
+.pop label { padding:6px 8px; display:flex; gap:8px; align-items:center; white-space:nowrap }
+.corpo { flex:1; min-height:0; display:flex; gap:10px; padding:10px }
+.lateral { width:380px; flex:none; display:flex; flex-direction:column; gap:10px; min-height:0 }
+.painel { background:var(--painel); border:1px solid var(--borda); border-radius:8px; min-height:0 }
+.abas-painel { flex:1 1 55%; display:flex; flex-direction:column }
+.abas { display:flex; gap:4px; padding:6px 10px 0; border-bottom:1px solid var(--borda) }
+.abas button { border:0; background:transparent; padding:8px 8px; color:var(--suave); border-bottom:2px solid transparent }
+.abas button.ativa { color:var(--texto); font-weight:600; border-bottom-color:var(--acento) }
+.aba { padding:10px; overflow:auto; flex:1 }
+.campo { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--suave); margin-bottom:8px }
+.campo input { height:30px; padding:0 8px; border:1px solid var(--borda); border-radius:6px; background:var(--campo); color:var(--texto); font:inherit }
+.vazio { color:var(--fraco); font-size:13px }
+.props { flex:1 1 45%; display:flex; flex-direction:column }
+.titulo-painel { display:flex; align-items:center; justify-content:space-between; padding:8px 12px; border-bottom:1px solid var(--borda) }
+#propriedades { padding:10px 12px; overflow:auto }
+.nome { font-weight:700; font-size:15px } .classe { color:var(--acento); font-family:Consolas, monospace; font-size:12px; margin-bottom:8px }
+table.kv { width:100%; border-collapse:collapse; border:1px solid var(--borda); border-radius:6px; margin:6px 0 10px; font-size:13px }
+table.kv th { text-align:left; font:600 12px Consolas, monospace; padding:6px 8px; background:var(--elevado); border-bottom:1px solid var(--borda) }
+table.kv td { padding:5px 8px; border-top:1px solid var(--borda) } table.kv td:last-child { text-align:right }
+.resumo { margin-top:8px }
+.chip { display:inline-block; padding:1px 7px; border-radius:4px; font:12px Consolas, monospace; background:var(--elevado); border:1px solid var(--borda); margin:2px 2px 2px 0 }
+.chip.ok { color:var(--ok); border-color:var(--ok) } .chip.alerta { color:var(--aviso); border-color:var(--aviso) }
+.lista { width:100%; border-collapse:collapse; font-size:13px }
+.lista th { text-align:left; font-size:12px; color:var(--suave); padding:4px 6px; border-bottom:1px solid var(--borda) }
+.lista td { padding:5px 6px; border-bottom:1px solid var(--borda) } .lista tr.clicavel:hover td { background:var(--elevado); cursor:pointer }
+.lista tr.sel td { background:color-mix(in srgb, var(--acento) 14%, transparent) }
+.area3d { flex:1; position:relative; background:var(--painel); border:1px solid var(--borda); border-radius:8px; overflow:hidden; min-width:0 }
+.ferramentas { position:absolute; top:10px; left:10px; right:10px; z-index:5; display:flex; flex-wrap:wrap; gap:6px; align-items:center }
+.ferramentas .btn { background:var(--painel) }
+.grupo { display:inline-flex; align-items:center; gap:4px; padding:2px 4px 2px 8px; background:var(--painel); border:1px solid var(--borda); border-radius:6px }
+.grupo .btn { height:28px } .rotulo { font-size:12px; color:var(--fraco) }
+.grupo select { height:28px; border:1px solid var(--borda); border-radius:5px; background:var(--campo); color:var(--texto); font:inherit }
+#viewport { position:absolute; inset:0; background:var(--fundo3d) }
+#rotulos { position:absolute; inset:0; pointer-events:none; overflow:hidden }
+.rot { position:absolute; transform:translate(-50%, -130%); font:600 11px Consolas, monospace; padding:1px 4px; border-radius:3px; background:#1b2430d9; color:#fff; white-space:nowrap }
+.legenda { position:absolute; left:12px; bottom:40px; z-index:5; background:var(--painel); border:1px solid var(--borda); border-radius:6px; padding:8px 10px; font-size:12px; min-width:200px }
+.legenda .barra { height:10px; border-radius:3px; margin:6px 0 2px }
+.legenda .esc { display:flex; justify-content:space-between; color:var(--suave) }
+.legenda .item { display:flex; align-items:center; gap:6px; margin-top:3px } .legenda .cor { width:12px; height:12px; border-radius:2px }
+.dica { position:absolute; right:10px; bottom:10px; z-index:5; font-size:11px; color:var(--suave); background:var(--painel); border:1px solid var(--borda); padding:4px 8px; border-radius:5px }
+.vazio3d { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:var(--fraco); pointer-events:none }
+.rodape { display:flex; align-items:center; gap:10px; padding:4px 14px; background:var(--painel); border-top:1px solid var(--borda); font-size:12px; color:var(--suave) }
+.saida { margin:0; height:200px; overflow:auto; padding:8px 14px; background:var(--elevado); border-top:1px solid var(--borda); font:12px/1.35 Consolas, monospace; white-space:pre-wrap }
+.ocupado { position:fixed; inset:0; background:#0004; z-index:50; display:flex; align-items:center; justify-content:center }
+.ocupado > div { background:var(--painel); padding:18px 24px; border-radius:10px; display:flex; gap:12px; align-items:center; box-shadow:0 10px 30px #0003 }
+.giro { width:22px; height:22px; border:3px solid var(--borda); border-top-color:var(--acento); border-radius:50%; animation:g 0.9s linear infinite } @keyframes g { to { transform:rotate(360deg) } }
+
+.opcoes { display:flex; flex-direction:column; gap:4px; margin:4px 0 8px; font-size:13px } .opcoes label { display:flex; gap:6px; align-items:center }
+.duas { display:grid; grid-template-columns:1fr 1fr; gap:0 8px }
+.campo select { height:30px; border:1px solid var(--borda); border-radius:6px; background:var(--campo); color:var(--texto); font:inherit }
+#btnCalcArea { width:100%; margin-top:4px }
+.retangulo { position:absolute; border:1.5px dashed var(--acento); background:color-mix(in srgb, var(--acento) 12%, transparent); pointer-events:none; z-index:6 }
+.carregando { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:6; background:var(--painel); border:1px solid var(--borda); border-radius:8px; padding:10px 16px; display:flex; gap:10px; align-items:center }
+.menu-ctx { position:fixed; top:auto; right:auto; min-width:200px; z-index:60 }
