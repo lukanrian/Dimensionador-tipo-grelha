@@ -164,6 +164,9 @@ O 3D usa a biblioteca camera-controls 2.9.0 (MIT, em `Web/lib`) com a mesma conf
   mede o tempo e compara com o Cholesky denso até 2.500 nós.
 - As extremidades de tubo sem conexão geométrica no componente que alimenta a área passam a aparecer nos avisos do cálculo e do memorial; valide-as em
   "Montagem da rede" para distinguir fim de linha intencional de conexão ausente.
-- A execução de referência atual foi comparada ao memorial PDF existente: a pressão mínima coincidiu (6,34 m.c.a.),
-  mas a vazão calculada (17,27 L/s) difere da vazão de referência (16,63 L/s) e a altura requerida (53,06 m) difere
-  da altura publicada (57,28 m). Portanto, o cálculo ainda exige revisão da topologia e dos critérios antes de uso de projeto.
+- Comparação com o memorial PDF do projeto modelo (57,28 m; 16,63 L/s):
+  - com a área do memorial (SP1, 14 bicos): pressão mínima igual (6,34 m.c.a.), vazão 17,27 L/s e altura 53,06 m;
+  - com a área mais desfavorável achada pelo programa (2º subsolo, 14 bicos; cálculo feito antes da 0.34): altura 57,34 m,
+    praticamente a publicada, e vazão 18,02 L/s.
+  A altura do projeto corresponde à área mais desfavorável; a diferença de vazão continua sem explicação. Revise a topologia
+  e os critérios antes de usar o resultado em projeto.
