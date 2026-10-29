@@ -1,4 +1,4 @@
-# Dimensionador Tipo Grelha 0.34
+# Dimensionador Tipo Grelha 0.35
 
 ## Organização das pastas
 
@@ -154,3 +154,10 @@ O 3D usa a biblioteca camera-controls 2.9.0 (MIT, em `Web/lib`) com a mesma conf
   fora da área não contam). As propriedades de cada elemento dizem como ele foi ligado e a distância. Confira antes de aceitar o resultado.
 - **Solucionador esparso:** o sistema de cada iteração é resolvido por gradiente conjugado com matriz esparsa; acabou o limite de
   4.000 nós da matriz densa. No IFC modelo o resultado é o mesmo da versão anterior (17,27 L/s; 53,06 m).
+
+## Convergência garantida do solucionador (0.35)
+
+- O gradiente conjugado confere o resíduo verdadeiro (b − A·x) no fim; acima de 1e-9 (relativo) o cálculo para com erro,
+  em vez de aceitar uma solução incompleta.
+- Autoteste: `Grelha.IfcInspector.exe --teste-solucionador` monta grelhas de 100 a 90.000 nós com resistências variadas,
+  mede o tempo e compara com o Cholesky denso até 2.500 nós.

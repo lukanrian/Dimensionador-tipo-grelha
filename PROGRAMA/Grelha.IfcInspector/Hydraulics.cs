@@ -781,7 +781,57 @@ internal static class Hydraulics
             rz = next;
             for (var i = 0; i < n; i++) direction[i] = z[i] + beta * direction[i];
         }
+        // Só devolve a solução se o resíduo verdadeiro (b − A·x, recalculado) for pequeno; senão o cálculo para em vez de aceitar
+        // uma solução incompleta. O resíduo da recorrência se afasta do verdadeiro por arredondamento, daí a folga de 1e-9.
+        Multiply(x, product);
+        double trueResidual = 0;
+        for (var i = 0; i < n; i++) trueResidual += (rhs[i] - product[i]) * (rhs[i] - product[i]);
+        var relative = Math.Sqrt(trueResidual / Math.Max(Dot(rhs, rhs), 1e-30));
+        if (relative > 1e-9)
+            throw new InvalidDataException($"O solucionador linear não convergiu (resíduo relativo {relative:0.0e+0} após {20 * n + 100} iterações no máximo); a rede pode estar mal condicionada.");
         return x;
+    }
+
+    // Autoteste do solucionador linear: grelha quadrada de trechos com resistências variadas (como a matriz do gradiente global),
+    // ligada à alimentação pelas bordas. Compara com o Cholesky denso até 2.500 nós e mede o tempo em redes maiores.
+    public static IEnumerable<string> SolverSelfTest(int[] sides)
+    {
+        var random = new Random(10897);
+        foreach (var side in sides)
+        {
+            var n = side * side;
+            var diagonal = new double[n];
+            var pairs = new List<(int A, int B, double W)>();
+            void Link(int a, int b, double w) { diagonal[a] += w; diagonal[b] += w; pairs.Add((a, b, w)); }
+            for (var row = 0; row < side; row++)
+                for (var col = 0; col < side; col++)
+                {
+                    var node = row * side + col;
+                    // inversos das derivadas variam ~4 ordens de grandeza (tubos de 25 a 150 mm, vazões diferentes)
+                    if (col + 1 < side) Link(node, node + 1, Math.Pow(10, random.NextDouble() * 4 - 6));
+                    if (row + 1 < side) Link(node, node + side, Math.Pow(10, random.NextDouble() * 4 - 6));
+                    if (row == 0 || col == 0) diagonal[node] += 1e-5; // ligação à alimentação (carga fixa)
+                }
+            var rhs = Enumerable.Range(0, n).Select(_ => (random.NextDouble() - 0.5) * 1e-3).ToArray();
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            var x = ConjugateGradient(diagonal, pairs, rhs, new double[n]);
+            var seconds = watch.Elapsed.TotalSeconds;
+            var check = new double[n];
+            for (var i = 0; i < n; i++) check[i] = diagonal[i] * x[i];
+            foreach (var (a, b, w) in pairs) { check[a] -= w * x[b]; check[b] -= w * x[a]; }
+            var residual = Math.Sqrt(Enumerable.Range(0, n).Sum(i => (check[i] - rhs[i]) * (check[i] - rhs[i])) / rhs.Sum(v => v * v));
+            var line = $"Grelha {side} × {side} = {n:N0} nós, {pairs.Count:N0} trechos: {seconds:0.000} s, resíduo relativo {residual:0.0e+0}";
+            if (n <= 2500)
+            {
+                var dense = new double[n, n];
+                for (var i = 0; i < n; i++) dense[i, i] = diagonal[i];
+                foreach (var (a, b, w) in pairs) { dense[a, b] -= w; dense[b, a] -= w; }
+                var reference = Cholesky(dense, rhs);
+                var scale = reference.Max(Math.Abs);
+                line += $"; diferença para o Cholesky denso {Enumerable.Range(0, n).Max(i => Math.Abs(reference[i] - x[i])) / scale:0.0e+0} (relativa)";
+            }
+            yield return line;
+        }
     }
     static double Dot(double[] a, double[] b) { double sum = 0; for (var i = 0; i < a.Length; i++) sum += a[i] * b[i]; return sum; }
 

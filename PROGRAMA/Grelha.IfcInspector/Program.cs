@@ -258,6 +258,11 @@ await LogAsync($"Leitor IFC iniciado. Versão {version}.");
 
 try
 {
+    if (args.Contains("--teste-solucionador"))
+    {
+        foreach (var line in Hydraulics.SolverSelfTest([10, 50, 100, 200, 300])) { Console.WriteLine(line); await LogAsync(line); }
+        return 0;
+    }
     string? sourcePipeOption = null;
     var sourceOptionIndex = Array.IndexOf(args, "--alimentacao");
     if (sourceOptionIndex >= 0 && sourceOptionIndex + 1 < args.Length)
