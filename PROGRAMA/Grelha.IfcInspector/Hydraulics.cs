@@ -34,6 +34,10 @@ internal sealed record HydraulicResult(string Mode, string SourceNode, string So
     HydraulicSprinklerResult[] Sprinklers, HydraulicPipeResult[] Pipes, HydraulicSegmentResult[] Segments, PumpCandidateResult[] Candidates, (double Flow_l_s, double Head_m)[] SystemCurve, string[] Warnings)
 {
     public AreaCandidateResult[] Areas { get; init; } = [];
+    /// <summary>Ligações deduzidas por proximidade (além do contato de 1 mm): Id do elemento → como foi ligado e a distância (m).</summary>
+    public Dictionary<string, (string How, double Distance_m)> Joins { get; init; } = [];
+    /// <summary>Pontas de tubo que ficaram sem nada ligado ("Id:0" ou "Id:1").</summary>
+    public string[] DeadEnds { get; init; } = [];
 }
 
 internal static class Hydraulics
@@ -132,6 +136,8 @@ internal static class Hydraulics
         var deviceBase = pipes.Count * 2;
         var headBase = deviceBase + devices.Count;
         var unionFind = new UnionFind(headBase + heads.Count);
+        var joins = new Dictionary<string, (string How, double Distance_m)>();
+        void Join(string id, string how, double distance) => joins[id] = (how, distance / unitsPerMeter);
         XbimPoint3D EndPoint(int index) => index % 2 == 0 ? pipes[index / 2].Start : pipes[index / 2].End;
         var endIndex = new SpatialIndex<int>(Enumerable.Range(0, deviceBase).Select(index => (index, EndPoint(index))), fittingTolerance);
         var fittingIndex = new SpatialIndex<int>(devices.Select((device, index) => (index, device.Origin)).Where(item => devices[item.index].Kind == HydraulicDeviceKind.Fitting), fittingTolerance);
@@ -167,8 +173,9 @@ internal static class Hydraulics
         {
             // Tomadas d'água: a origem fica no reservatório, longe da ponta do tubo de sucção.
             if (devices[d].Kind == HydraulicDeviceKind.Fitting && IsTankOutlet(devices[d].Type) && !attachedFittings.Contains(unionFind.Find(deviceBase + d))
-                && endIndex.TryNearest(devices[d].Origin, valveReach, index => loose[index], out var outletEnd, out _))
+                && endIndex.TryNearest(devices[d].Origin, valveReach, index => loose[index], out var outletEnd, out var outletDistance))
             {
+                Join(devices[d].Id, "tomada d'água ligada à ponta solta mais próxima", outletDistance);
                 unionFind.Union(outletEnd, deviceBase + d);
                 loose[outletEnd] = false;
             }
@@ -181,13 +188,17 @@ internal static class Hydraulics
                 .OrderBy(item => item.A.Distance + item.B.Distance).Select(item => new[] { item.A.Item, item.B.Item }).FirstOrDefault();
             var ends = pair ?? near.OrderBy(match => match.Distance).Take(1).Select(match => match.Item).ToArray();
             foreach (var end in ends) { unionFind.Union(end, deviceBase + d); loose[end] = false; }
+            Join(devices[d].Id, pair is not null ? "válvula entre duas pontas alinhadas" : ends.Length == 1 ? "válvula ligada a uma só ponta" : "válvula sem ligação",
+                ends.Length == 0 ? double.NaN : ends.Max(end => (EndPoint(end) - origin).Length));
             if (pair is null) warnings.Add($"Válvula {devices[d].Type} ({devices[d].Id}) sem par de pontas alinhadas até 40 cm; {(ends.Length == 1 ? "ligada como ponta" : "sem ligação")}.");
         }
         var pumpPorts = new List<(int Device, int[] Ends)>();
         for (var d = 0; d < devices.Count; d++)
         {
             if (devices[d].Kind != HydraulicDeviceKind.Pump) continue;
-            var ends = endIndex.FindWithin(devices[d].Origin, pumpReach, index => loose[index]).OrderBy(match => match.Distance).Take(2).Select(match => match.Item).ToArray();
+            var found = endIndex.FindWithin(devices[d].Origin, pumpReach, index => loose[index]).OrderBy(match => match.Distance).Take(2).ToArray();
+            var ends = found.Select(match => match.Item).ToArray();
+            Join(devices[d].Id, ends.Length == 2 ? "bomba entre as duas pontas soltas mais próximas" : "bomba ignorada (sem duas pontas até 1 m)", found.Select(match => match.Distance).DefaultIfEmpty(double.NaN).Max());
             foreach (var end in ends) loose[end] = false;
             if (ends.Length == 2) pumpPorts.Add((d, ends));
             else warnings.Add($"Bomba {devices[d].Type} ({devices[d].Id}) com {ends.Length} extremidade(s) livre(s) até 1 m; ignorada.");
@@ -206,9 +217,11 @@ internal static class Hydraulics
                 .Select(match => (Fitting: d, End: match.Item, match.Distance)))
             .OrderBy(item => item.Distance).ToList();
         var extendedLinks = 0;
-        foreach (var (d, end, _) in extended)
+        foreach (var (d, end, distance) in extended)
         {
             if (!loose[end] || missing[d] <= 0 || Rejected(pipes[end / 2].Id, (end % 2).ToString(), devices[d].Id, "")) continue;
+            Join(devices[d].Id, "conexão ligada a ponta além de 5 cm", distance);
+            Join(pipes[end / 2].Id, "ponta ligada a conexão além de 5 cm", distance);
             unionFind.Union(end, deviceBase + d);
             loose[end] = false;
             missing[d]--;
@@ -241,10 +254,11 @@ internal static class Hydraulics
             if (IsElbow(device.Type)) return device.Type.Contains("45") ? dot is > -0.85 and < -0.55 : Math.Abs(dot) < 0.3;
             return dot < -0.9 && Math.Abs(pipes[ends[0] / 2].InnerDiameter_m - pipes[ends[1] / 2].InnerDiameter_m) > 1e-4;
         }
-        foreach (var (d, end, _) in orphans)
+        foreach (var (d, end, distance) in orphans)
         {
             var root = unionFind.Find(end);
             if (adopted.Contains(d) || clusterFitted.Contains(root) || !Compatible(devices[d], endsByRoot[root])) continue;
+            Join(devices[d].Id, "conexão deslocada atribuída ao nó de tubos mais próximo", distance);
             unionFind.Union(deviceBase + d, end);
             clusterFitted.Add(unionFind.Find(end));
             adopted.Add(d);
@@ -254,12 +268,17 @@ internal static class Hydraulics
 
         for (var h = 0; h < heads.Count; h++)
         {
-            if (!endIndex.TryNearest(heads[h].Origin, fittingTolerance, _ => true, out var end, out _))
+            if (!endIndex.TryNearest(heads[h].Origin, fittingTolerance, _ => true, out var end, out var headDistance))
                 throw new InvalidDataException($"Bico {heads[h].Number} ({heads[h].Id}) sem extremidade de tubo até 5 cm.");
             if (Rejected(heads[h].Id, heads[h].Number.ToString(), pipes[end / 2].Id, (end % 2).ToString()))
                 throw new InvalidDataException($"A associação do bico {heads[h].Number} ao ramal foi rejeitada na revisão; corrija o modelo ou confirme outra associação.");
             unionFind.Union(headBase + h, end);
+            if (headDistance > directTolerance) Join(heads[h].Id, "bico ligado à ponta de tubo mais próxima", headDistance);
         }
+        // Pontas de tubo sem nenhum outro elemento no nó (fim de linha, ou ligação que a geometria não encontrou).
+        var pointsInNode = new Dictionary<int, int>();
+        for (var point = 0; point < headBase + heads.Count; point++) pointsInNode[unionFind.Find(point)] = pointsInNode.GetValueOrDefault(unionFind.Find(point)) + 1;
+        var deadEnds = Enumerable.Range(0, deviceBase).Where(end => pointsInNode[unionFind.Find(end)] == 1).Select(end => $"{pipes[end / 2].Id}:{end % 2}").ToArray();
 
         // Nós hidráulicos.
         var nodeOf = new Dictionary<int, int>();
@@ -489,7 +508,6 @@ internal static class Hydraulics
             links.Add(new Link(LinkKind.Emitter, headNodes[h], -2 - h, active[h] ? 1 / (coefficient * coefficient) : 1e18) { Flow = active[h] ? 0.0005 : 0 });
         }
         int n = unknown.Length;
-        if (n > 4000) throw new InvalidDataException($"Rede reduzida ainda tem {n} nós; limite do solucionador denso excedido.");
 
         var iterations = 0;
         double[] Run(double fixedHead)
@@ -499,7 +517,10 @@ internal static class Hydraulics
             for (var iteration = 0; iteration < 300; iteration++)
             {
                 iterations++;
-                var matrix = new double[n, n];
+                // Matriz esparsa (diagonal + um termo fora da diagonal por trecho): memória e tempo crescem com o número de trechos,
+                // não com o quadrado do número de nós, e não há limite de tamanho da rede.
+                var diagonal = new double[n];
+                var pairs = new List<(int A, int B, double W)>();
                 var rhs = new double[n];
                 foreach (var link in links)
                 {
@@ -509,13 +530,13 @@ internal static class Hydraulics
                     var constant = link.Flow - loss * inverse;
                     int? from = position.TryGetValue(link.From, out var fp) ? fp : null;
                     int? to = link.To >= 0 && position.TryGetValue(link.To, out var tp) ? tp : null;
-                    if (from is int i) { matrix[i, i] += inverse; rhs[i] -= constant; }
-                    if (to is int j) { matrix[j, j] += inverse; rhs[j] += constant; }
-                    if (from is int a && to is int b) { matrix[a, b] -= inverse; matrix[b, a] -= inverse; }
+                    if (from is int i) { diagonal[i] += inverse; rhs[i] -= constant; }
+                    if (to is int j) { diagonal[j] += inverse; rhs[j] += constant; }
+                    if (from is int a && to is int b) pairs.Add((a, b, inverse));
                     if (from is int c && to is null) rhs[c] += inverse * Head(solution, link.To);
                     if (to is int e && from is null) rhs[e] += inverse * Head(solution, link.From);
                 }
-                solution = Cholesky(matrix, rhs);
+                solution = ConjugateGradient(diagonal, pairs, rhs, solution);
                 double change = 0, total = 0;
                 foreach (var link in links)
                 {
@@ -705,7 +726,7 @@ internal static class Hydraulics
             inComponent.Count(value => value), n, chainCount, iterations, pumpResult,
             (memorialTable.Count > 0 ? "Memorial (itens e bitolas da tabela de conexões), com tabela usual de aço nos demais" : "Tabela usual de aço")
                 + "; tês somente na mudança de direção (NBR 10897, 9.4.4.7)",
-            fromMemorial, fromTable, sprinklerResults, pipeResults, segments.ToArray(), candidateResults.ToArray(), systemCurve.OrderBy(point => point.Flow_l_s).ToArray(), warnings.ToArray()) { Areas = areaResults.ToArray() };
+            fromMemorial, fromTable, sprinklerResults, pipeResults, segments.ToArray(), candidateResults.ToArray(), systemCurve.OrderBy(point => point.Flow_l_s).ToArray(), warnings.ToArray()) { Areas = areaResults.ToArray(), Joins = joins, DeadEnds = deadEnds };
     }
 
     // Ajuste H = A + B Q + C Q² por mínimos quadrados (linear com 2 pontos). Vazões em l/s, alturas em m.
@@ -727,6 +748,42 @@ internal static class Hydraulics
         var x = Cholesky(m, v);
         return (x[0], x[1], x[2]);
     }
+
+    // Gradiente conjugado com pré-condicionador diagonal para a matriz simétrica positiva definida do método do gradiente global.
+    // Parte da solução anterior (as iterações de Newton mudam pouco de uma para a outra).
+    static double[] ConjugateGradient(double[] diagonal, List<(int A, int B, double W)> pairs, double[] rhs, double[] start)
+    {
+        var n = rhs.Length;
+        if (diagonal.Any(value => value <= 0)) throw new InvalidDataException("Sistema hidráulico singular: há trecho sem caminho até a alimentação.");
+        void Multiply(double[] x, double[] y)
+        {
+            for (var i = 0; i < n; i++) y[i] = diagonal[i] * x[i];
+            foreach (var (a, b, w) in pairs) { y[a] -= w * x[b]; y[b] -= w * x[a]; }
+        }
+        var x = start.Length == n ? (double[])start.Clone() : new double[n];
+        var residual = new double[n];
+        Multiply(x, residual);
+        for (var i = 0; i < n; i++) residual[i] = rhs[i] - residual[i];
+        var z = residual.Select((value, i) => value / diagonal[i]).ToArray();
+        var direction = (double[])z.Clone();
+        var product = new double[n];
+        var rz = Dot(residual, z);
+        var limit = 1e-26 * Math.Max(Dot(rhs, rhs), 1e-30);
+        for (var iteration = 0; iteration < 20 * n + 100 && Dot(residual, residual) > limit; iteration++)
+        {
+            Multiply(direction, product);
+            var curvature = Dot(direction, product);
+            if (curvature <= 0) throw new InvalidDataException("Sistema hidráulico singular: há trecho sem caminho até a alimentação.");
+            var step = rz / curvature;
+            for (var i = 0; i < n; i++) { x[i] += step * direction[i]; residual[i] -= step * product[i]; z[i] = residual[i] / diagonal[i]; }
+            var next = Dot(residual, z);
+            var beta = next / rz;
+            rz = next;
+            for (var i = 0; i < n; i++) direction[i] = z[i] + beta * direction[i];
+        }
+        return x;
+    }
+    static double Dot(double[] a, double[] b) { double sum = 0; for (var i = 0; i < a.Length; i++) sum += a[i] * b[i]; return sum; }
 
     static double[] Cholesky(double[,] matrix, double[] rhs)
     {

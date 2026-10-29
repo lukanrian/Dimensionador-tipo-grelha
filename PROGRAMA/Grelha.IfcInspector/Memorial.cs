@@ -155,7 +155,7 @@ internal static class MemorialWriter
         Picture(main, body, chartData);
         Text("Curva verde: bomba (pontos do catálogo; tracejada fora da faixa tabelada). Curva vermelha: sistema da rede do IFC. Quadrado vermelho: ponto de operação; quadrado azul: ponto mínimo da rede; triângulo laranja: 150% da vazão.", size: 16, color: "526170");
         Text("Verificação de desempenho (ABNT NBR 16704:2019), com o ponto de operação adotado como ponto nominal:", true);
-        Table(["Verificação", "Exigência", "Valor", "Situação"], m.Pump.Checks.Select(check => new[] { check.Rule, check.Requirement, check.Value, check.Pass ? "Atende" : "Não atende" }));
+        Table(["Verificação", "Exigência", "Valor", "Situação"], m.Pump.Checks.Select(check => new[] { check.Rule, check.Requirement, check.Value, !check.Pass ? "Não atende" : m.Pump.Extrapolated150 && check.Rule.StartsWith("150%") ? "A confirmar" : "Atende" }));
         if (m.Pump.Extrapolated150)
             Text("Observação: a vazão de 150% fica além da última vazão tabelada no catálogo; a altura correspondente foi estimada pelo ajuste quadrático da curva e deve ser confirmada na curva de ensaio do fabricante (NBR 16704, 4.5).", color: "8A4B00");
 

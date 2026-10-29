@@ -12,7 +12,7 @@ public sealed class PumpSelectionForm : Form
     private sealed record CurvePoint(double Head_m, double Flow_m3_h);
     private sealed record CatalogPump(string Id, string Manufacturer, string Model, string Family, string Role, int CatalogPage, double Power_cv,
         double? Stages, double? Suction_in, double? Discharge_in, double? ShutoffHead_m, double? MaxSuctionLift_m, double? Impeller_mm, CurvePoint[] Curve);
-    private sealed record Evaluation(string Id, bool Meets, double Flow, double Head, double MinPressure, double Suction, double Discharge,
+    private sealed record Evaluation(string Id, bool Meets, bool Pending, double Flow, double Head, double MinPressure, double Suction, double Discharge,
         double Shutoff, double Limit140, double Head150, double Limit65, string Notes);
 
     private static readonly CultureInfo Br = CultureInfo.GetCultureInfo("pt-BR");
@@ -61,7 +61,7 @@ public sealed class PumpSelectionForm : Form
         model.Dock = DockStyle.Fill;
         model.TextAlign = ContentAlignment.MiddleLeft;
         header.Controls.Add(model, 1, 3);
-        onlyMeeting.Text = "Mostrar só as bombas que atendem à rede e à NBR 16704";
+        onlyMeeting.Text = "Mostrar só as bombas que atendem (✔) ou ficam a confirmar (?) pela NBR 16704";
         onlyMeeting.Checked = true;
         onlyMeeting.Dock = DockStyle.Fill;
         header.Controls.Add(onlyMeeting, 1, 4);
@@ -99,7 +99,7 @@ public sealed class PumpSelectionForm : Form
         FillGroups();
         if (initialPumpId is not null && catalog.TryGetValue(initialPumpId, out var initial))
         {
-            if (!evaluations.Any(e => e.Id == initialPumpId && e.Meets)) onlyMeeting.Checked = false;
+            if (!evaluations.Any(e => e.Id == initialPumpId && (e.Meets || e.Pending))) onlyMeeting.Checked = false;
             group.SelectedItem = GroupOf(initial);
             foreach (var item in piece.Items.OfType<PieceItem>()) if (item.Id == initialPumpId) piece.SelectedItem = item;
         }
@@ -121,7 +121,7 @@ public sealed class PumpSelectionForm : Form
 
     private string GroupOf(CatalogPump pump) => $"{Inches(pump.Suction_in)} x {Inches(pump.Discharge_in)}";
 
-    private IEnumerable<Evaluation> Listed => evaluations.Where(e => catalog.ContainsKey(e.Id) && (!onlyMeeting.Checked || e.Meets));
+    private IEnumerable<Evaluation> Listed => evaluations.Where(e => catalog.ContainsKey(e.Id) && (!onlyMeeting.Checked || e.Meets || e.Pending));
 
     private void FillGroups()
     {
@@ -143,7 +143,7 @@ public sealed class PumpSelectionForm : Form
         foreach (var e in Listed.Where(e => GroupOf(catalog[e.Id]) == group.SelectedItem as string))
         {
             var p = catalog[e.Id];
-            piece.Items.Add(new PieceItem(p.Id, $"{(e.Meets ? "✔" : "✖")}  {p.Model} – {p.Power_cv.ToString("0.##", Br)} cv" +
+            piece.Items.Add(new PieceItem(p.Id, $"{(e.Meets ? "✔" : e.Pending ? "?" : "✖")}  {p.Model} – {p.Power_cv.ToString("0.##", Br)} cv" +
                 (p.Impeller_mm is double r ? $" – rotor {r:0} mm" : "") + $"  ({e.Flow.ToString("0.0", Br)} m³/h a {e.Head.ToString("0.0", Br)} m)"));
         }
         if (piece.Items.Count > 0) piece.SelectedIndex = 0;
@@ -193,7 +193,9 @@ public sealed class PumpSelectionForm : Form
     {
         var e = CurrentEvaluation;
         if (e is null) return;
-        if (!e.Meets && MessageBox.Show(this, "Esta bomba não atende a todas as verificações. Gerar o memorial mesmo assim?", "Bomba não atende",
+        if (e.Pending && MessageBox.Show(this, "O ponto de 150% da vazão desta bomba fica além da curva do catálogo; a altura foi extrapolada e precisa ser confirmada na curva de ensaio do fabricante. Gerar o memorial mesmo assim?", "Bomba a confirmar",
+                MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        if (!e.Meets && !e.Pending && MessageBox.Show(this, "Esta bomba não atende a todas as verificações. Gerar o memorial mesmo assim?", "Bomba não atende",
                 MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         SelectedPumpId = e.Id;
         DialogResult = DialogResult.OK;
@@ -224,7 +226,7 @@ public sealed class PumpSelectionForm : Form
         int Col(string name) => Array.IndexOf(header, name);
         double D(string[] row, string name) => Col(name) is >= 0 and var i && i < row.Length && double.TryParse(row[i], NumberStyles.Float, Br, out var v) ? v : double.NaN;
         foreach (var row in lines.Skip(1).Where(line => line.Length > 0).Select(Split))
-            evaluations.Add(new Evaluation(row[Col("Id")], row[Col("Atende")] == "Sim", D(row, "Vazao_operacao_m3h"), D(row, "Altura_operacao_m"),
+            evaluations.Add(new Evaluation(row[Col("Id")], row[Col("Atende")] == "Sim", row[Col("Atende")] == "A confirmar", D(row, "Vazao_operacao_m3h"), D(row, "Altura_operacao_m"),
                 D(row, "Pressao_min_bicos_mca"), D(row, "Succao_mca"), D(row, "Recalque_mca"), D(row, "Pressao_sem_vazao_m"), D(row, "Limite_140_m"),
                 D(row, "Altura_150_m"), D(row, "Limite_65_m"), row[Col("Observacoes")]));
     }

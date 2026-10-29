@@ -150,6 +150,7 @@ async function readIfcGeometry(base, origin) {
 // Como no Visor IFC: a rede inteira vai numa só malha em lote (BatchedMesh), desenhada em uma chamada pela placa de vídeo.
 // Cor, ocultar e isolar só mudam o estado de cada item; nada é recriado.
 let batch = null;
+let deadMarkers = [];
 const plain = (g) => { const c = g.clone(); c.deleteAttribute("uv"); return c; };
 const unitCylinderB = plain(unitCylinder), unitSphereB = plain(unitSphere), unitBoxB = plain(unitBox);
 function setVisible(o, v) { o.visible = v; batch?.setVisibleAt(o.iid, v); }
@@ -191,6 +192,10 @@ function build(network) {
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.22, 0.32, 24), new THREE.MeshBasicMaterial({ color: 0xd63384, side: THREE.DoubleSide }));
     ring.position.set(...o.data.P); ring.visible = false; world.add(ring); o.ring = ring;
   }
+  // Pontas de tubo que o cálculo deixou sem nada ligado (vistas no modo "Montagem da rede").
+  deadMarkers = (network.DeadEnds ?? []).map((d) => {
+    const m = new THREE.Mesh(unitSphere, new THREE.MeshBasicMaterial({ color: 0xd8342b })); m.scale.setScalar(0.09); m.position.set(...d.P); m.visible = false; world.add(m); return m;
+  });
   $("vReal").parentElement.hidden = !!ifcGeometry;
   // Modelo reto: gira a rede para que os ramais do pavimento com mais bicos fiquem na horizontal.
   const main = [...(network.Layouts ?? [])].sort((a, b) => objects.filter((o) => o.data.Storey === b.Storey).length - objects.filter((o) => o.data.Storey === a.Storey).length)[0];
@@ -209,7 +214,8 @@ function recolor() {
   const pMin = Math.min(...heads), pMax = Math.max(...heads);
   for (const o of objects) {
     let color;
-    if (o.kind === "pipe") {
+    if (mode === "montagem") color = new THREE.Color(!o.data.Join ? 0xb8c4d6 : /ignorada|sem ligação|uma só ponta/.test(o.data.Join) ? 0xd8342b : 0xf0a020);
+    else if (o.kind === "pipe") {
       const q = o.data.Q_l_s;
       if (mode === "diametro") color = ramp(diameters.indexOf(o.data.D_mm) / Math.max(diameters.length - 1, 1));
       else if (q == null || q < 1e-4) color = new THREE.Color(0xb8bec8);
@@ -236,6 +242,9 @@ function legend(mode, info) {
   const pressure = Number.isFinite(info.pMin) ? `<div style="margin-top:6px">Pressão nos bicos da área (m.c.a.)</div><div class="barra" style="background:${bar}"></div><div class="esc"><span>${fmt(info.pMin)}</span><span>${fmt(info.pMax)}</span></div>` : "";
   if (mode === "vazao") el.innerHTML = scale("Vazão nos tubos (L/s)", "0", fmt(info.max.vazao)) + item("#b8bec8", "Sem vazão");
   else if (mode === "velocidade") el.innerHTML = scale("Velocidade (m/s)", "0", fmt(info.max.velocidade)) + item("#b8bec8", "Sem vazão");
+  else if (mode === "montagem") el.innerHTML = `<b>Montagem da rede pelo cálculo</b>` + item("#b8c4d6", "Ligado por contato (até 1 mm)") + item("#f0a020", `Ligação deduzida por proximidade (${objects.filter((o) => o.data.Join && !/ignorada|sem ligação|uma só ponta/.test(o.data.Join)).length})`)
+    + item("#d8342b", `Ligação incompleta (${objects.filter((o) => /ignorada|sem ligação|uma só ponta/.test(o.data.Join ?? "")).length})`) + item("#d8342b", `● Ponta de tubo sem nada ligado (${deadMarkers.length})`)
+    + `<div style="margin-top:6px;max-width:240px">Confira as laranjas e vermelhas antes de aceitar o resultado.</div>`;
   else if (mode === "diametro") el.innerHTML = scale("Diâmetro interno (mm)", fmt(info.diameters[0], 1), fmt(info.diameters.at(-1), 1));
   else el.innerHTML = `<b>Situação do cálculo</b>` + item("#e8711f", "Tubo com vazão") + item("#b8bec8", "Tubo sem vazão") + item("#2f6fde", "Válvula") + item("#e8711f", "Bomba em operação") + pressure;
   if (state.mode === "2d") el.innerHTML += item("#d63384", `Área escolhida: ${state.area.size} bico(s)`);
@@ -264,6 +273,8 @@ function applyVisibility() {
     setVisible(o, visible && inFloor(o, range) && !state.hidden.has(o.data.Id) && (!state.isolated || state.isolated.has(o.data.Id)));
     if (o.ring) o.ring.visible = state.mode === "2d" && state.area.has(o.data.Id) && inFloor(o, range);
   }
+  const montagem = $("colorir").value === "montagem";
+  for (const m of deadMarkers) m.visible = montagem && (!range || (m.position.z >= range.z[0] && m.position.z <= range.z[1]));
 }
 function floors() {
   const sel = $("pavimento"); const previous = sel.value;
@@ -490,6 +501,7 @@ function kv(title, rows) {
 function showProperties(o) {
   const el = $("propriedades");
   if (!o) { el.innerHTML = `<p class="vazio">Clique num elemento da rede.</p>`; return; }
+  const join = () => kv("Montagem da rede", [["Ligação", o.data.Join ?? "por contato (até 1 mm)"], o.data.JoinDist_m != null && ["Distância", `${fmt(o.data.JoinDist_m * 100, 1)} cm`]]);
   const d = o.data; const pos = (p) => `${fmt(p[0])}; ${fmt(p[1])}; ${fmt(p[2])}`;
   const origin = state.network.Origin; const z = (p) => fmt(p[2] + origin.Z);
   if (o.kind === "pipe") {
@@ -497,17 +509,17 @@ function showProperties(o) {
       + kv("Identificação", [["GlobalId", d.Id], ["Diâmetro interno", `${fmt(d.D_mm, 1)} mm`], ["Comprimento", `${fmt(d.L_m, 3)} m`]])
       + kv("Cálculo hidráulico", d.Q_l_s == null ? [["Situação", "fora do trecho calculado"]] : [["Vazão", `${fmt(d.Q_l_s, 3)} L/s (${fmt(d.Q_l_s * 3.6)} m³/h)`],
         ["Velocidade", `${fmt(d.V_m_s)} m/s`], ["Comprimento equivalente", `${fmt(d.Leq_m)} m`], ["Perda de carga", `${fmt(d.Loss_m, 3)} m`]])
-      + kv("Geometria (m)", [["Início X; Y; Z", pos(d.A)], ["Fim X; Y; Z", pos(d.B)], ["Cota do início", `${z(d.A)} m`]]);
+      + kv("Geometria (m)", [["Início X; Y; Z", pos(d.A)], ["Fim X; Y; Z", pos(d.B)], ["Cota do início", `${z(d.A)} m`]]) + join();
   } else if (o.kind === "sprinkler") {
     el.innerHTML = `<div class="nome">${d.Number != null ? `Bico ${d.Number} da área de operação` : "Bico fora da área de operação"}</div><div class="classe">Sprinkler (IfcFireSuppressionTerminal)</div>`
       + kv("Identificação", [["GlobalId", d.Id], ["Tipo", d.Type ?? "—"], ["Na área escolhida (2D)", state.area.has(d.Id) ? "sim" : "não"]])
       + (d.Number != null ? kv("Cálculo hidráulico", [["Pressão", `${fmt(d.Pressure_mca)} m.c.a.`], ["Vazão", `${fmt(d.Q_l_s, 3)} L/s (${fmt(d.Q_l_s * 60, 1)} L/min)`]]) : "")
-      + kv("Posição (m)", [["X; Y; Z", pos(d.P)], ["Cota", `${z(d.P)} m`]]);
+      + kv("Posição (m)", [["X; Y; Z", pos(d.P)], ["Cota", `${z(d.P)} m`]]) + join();
   } else {
     const names = { pump: "Bomba (IfcPump)", valve: "Válvula (IfcValve)", fitting: "Conexão (IfcPipeFitting)" };
     el.innerHTML = `<div class="nome">${esc(d.Type)}</div><div class="classe">${names[o.kind]}</div>`
       + kv("Identificação", [["GlobalId", d.Id], ["Indicação", d.Indication || "—"], o.kind === "pump" && ["Situação", d.Active ? "bomba usada no cálculo" : "desligada no cálculo (reserva/jóquei)"]])
-      + kv("Posição (m)", [["X; Y; Z", pos(d.P)], ["Cota", `${z(d.P)} m`]]);
+      + kv("Posição (m)", [["X; Y; Z", pos(d.P)], ["Cota", `${z(d.P)} m`]]) + join();
   }
 }
 
@@ -539,11 +551,12 @@ function parseCsv(text) {
   const head = rows.shift() ?? []; return rows.map((r) => Object.fromEntries(head.map((h, i) => [h, r[i]])));
 }
 function pumpsTable() {
-  const list = state.pumps.filter((p) => p.Atende === "Sim");
+  const list = state.pumps.filter((p) => p.Atende === "Sim" || p.Atende === "A confirmar");
+  const pending = list.filter((p) => p.Atende === "A confirmar").length;
   $("listaBombas").innerHTML = !state.pumps.length ? `<p class="vazio">Sem seleção de bombas. Analise o IFC.</p>`
-    : `<p class="vazio">${list.length} de ${state.pumps.length} bombas atendem. Clique numa bomba para ver a curva e os dados.</p>`
+    : `<p class="vazio">${list.length - pending} de ${state.pumps.length} bombas atendem${pending ? ` e ${pending} ficam a confirmar (150% fora da curva do catálogo)` : ""}. Clique numa bomba para ver a curva e os dados.</p>`
       + `<table class="lista"><tr><th>Bomba</th><th>cv</th><th>Q (m³/h)</th><th>H (m)</th></tr>${list.map((p) =>
-        `<tr class="clicavel${p.Id === state.selectedPumpId ? " sel" : ""}" data-id="${esc(p.Id)}" title="${esc(p.Observacoes)}"><td>${esc(p.Modelo)}${p.Rotor_mm ? ` · ${esc(p.Rotor_mm)} mm` : ""}</td><td>${esc(p.Potencia_cv)}</td><td>${esc(p.Vazao_operacao_m3h)}</td><td>${esc(p.Altura_operacao_m)}</td></tr>`).join("")}</table>`;
+        `<tr class="clicavel${p.Id === state.selectedPumpId ? " sel" : ""}" data-id="${esc(p.Id)}" title="${esc(p.Observacoes)}"><td>${esc(p.Modelo)}${p.Rotor_mm ? ` · ${esc(p.Rotor_mm)} mm` : ""}${p.Atende === "A confirmar" ? ' <span class="chip alerta">a confirmar</span>' : ""}</td><td>${esc(p.Potencia_cv)}</td><td>${esc(p.Vazao_operacao_m3h)}</td><td>${esc(p.Altura_operacao_m)}</td></tr>`).join("")}</table>`;
   document.querySelectorAll("#listaBombas tr.clicavel").forEach((tr) => tr.onclick = () => {
     state.selectedPumpId = tr.dataset.id; pumpsTable(); updateButtons(); send({ cmd: "selectPump", id: tr.dataset.id });
   });
@@ -632,7 +645,7 @@ $("btnAutoArea").onclick = () => {
   send({ cmd: "analyzeAuto", area: criteria, ...runArgs() });
 };
 $("btnCalcArea").onclick = () => state.area.size && send({ cmd: "analyzeArea", area: areaPayload(), ...runArgs() });
-$("colorir").onchange = recolor;
+$("colorir").onchange = () => { recolor(); applyVisibility(); };
 for (const id of ["vConexoes", "vValvulas", "vBicos", "vSemVazao"]) $(id).onchange = applyVisibility;
 $("vReal").onchange = () => state.network && build(state.network);
 $("btnLimpar").onclick = () => select(null);

@@ -984,6 +984,8 @@ try
                     [Math.Round((point.X - minX) / unitsPerMeter, 3), Math.Round((point.Y - minY) / unitsPerMeter, 3), Math.Round((point.Z - minZ) / unitsPerMeter, 3)];
                 var pipeResults = hydraulic.Pipes.ToDictionary(pipe => pipe.Id);
                 var headResults = hydraulic.Sprinklers.ToDictionary(head => head.Id);
+                (string? How, double? Distance) JoinOf(string id) => hydraulic.Joins.TryGetValue(id, out var join)
+                    ? (join.How, double.IsNaN(join.Distance_m) ? null : Math.Round(join.Distance_m, 3)) : (null, null);
                 var network = new
                 {
                     Version = version,
@@ -1014,17 +1016,24 @@ try
                         {
                             pipe.Id, pipe.Type, D_mm = Math.Round(pipe.InnerDiameter_m * 1000, 1), L_m = Math.Round(pipe.Length_m, 3), A = Xyz(pipe.Start), B = Xyz(pipe.End),
                             Q_l_s = result is null ? (double?)null : Math.Round(result.Flow_l_s, 4), V_m_s = result is null ? (double?)null : Math.Round(result.Velocity_m_s, 3),
-                            Loss_m = result is null ? (double?)null : Math.Round(result.HeadLoss_m, 4), Leq_m = result is null ? (double?)null : Math.Round(result.EquivalentLength_m, 2)
+                            Loss_m = result is null ? (double?)null : Math.Round(result.HeadLoss_m, 4), Leq_m = result is null ? (double?)null : Math.Round(result.EquivalentLength_m, 2),
+                            Join = JoinOf(pipe.Id).How, JoinDist_m = JoinOf(pipe.Id).Distance
                         };
                     }),
                     Sprinklers = sprinklerAnchors.Select(anchor =>
                     {
                         var id = Id(anchor.Item);
                         var result = headResults.GetValueOrDefault(id);
-                        return new { Id = id, Type = TypeName(anchor.Item), Storey = StoreyOf(anchor.Item), P = Xyz(anchor.Point), Number = result?.Number, Pressure_mca = result?.Pressure_mca, Q_l_s = result?.Flow_l_s };
+                        return new { Id = id, Type = TypeName(anchor.Item), Storey = StoreyOf(anchor.Item), P = Xyz(anchor.Point), Number = result?.Number, Pressure_mca = result?.Pressure_mca, Q_l_s = result?.Flow_l_s, Join = JoinOf(id).How, JoinDist_m = JoinOf(id).Distance };
                     }),
                     Layouts = layouts.Values.Select(layout => new { layout.Storey, layout.BranchAngle_rad, layout.SpacingAlong_m, layout.SpacingAcross_m, Elevation_m = layout.Elevation_m - minZ / unitsPerMeter }),
-                    Devices = hydraulicDevices.Select(device => new { device.Id, Kind = device.Kind.ToString(), device.Type, device.Indication, P = Xyz(device.Origin), Active = device.Id == hydraulic.Pump?.Id })
+                    Devices = hydraulicDevices.Select(device => new { device.Id, Kind = device.Kind.ToString(), device.Type, device.Indication, P = Xyz(device.Origin), Active = device.Id == hydraulic.Pump?.Id, Join = JoinOf(device.Id).How, JoinDist_m = JoinOf(device.Id).Distance }),
+                    // Rede montada pelo cálculo: pontas de tubo sem nada ligado (para conferência no 3D). Pontas em bicos fora da área
+                    // ficam de fora: são o fim normal do ramal, o bico só não entra no cálculo.
+                    DeadEnds = hydraulic.DeadEnds.Select(key => key.Split(':')).Select(part => (Pipe: hydraulicPipes.FirstOrDefault(pipe => pipe.Id == part[0]), End: part[1]))
+                        .Where(item => item.Pipe is not null).Select(item => (item.Pipe!.Id, Point: item.End == "0" ? item.Pipe.Start : item.Pipe.End))
+                        .Where(item => !sprinklerAnchors.Any(anchor => (anchor.Point - item.Point).Length <= 0.06 * unitsPerMeter))
+                        .Select(item => new { item.Id, P = Xyz(item.Point) })
                 };
                 await File.WriteAllTextAsync(Path.ChangeExtension(input, ".network-3d.json"), JsonSerializer.Serialize(network, new JsonSerializerOptions { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
 

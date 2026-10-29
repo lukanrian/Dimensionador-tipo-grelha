@@ -1,4 +1,4 @@
-# Dimensionador Tipo Grelha 0.33
+# Dimensionador Tipo Grelha 0.34
 
 ## Organização das pastas
 
@@ -144,3 +144,13 @@ O 3D usa a biblioteca camera-controls 2.9.0 (MIT, em `Web/lib`) com a mesma conf
 
 - O IFC da rede (`*.network.ifc`) agora também é refeito quando o leitor é mais novo que ele, e não só quando o IFC muda.
 - O texto sobre topologia foi corrigido: o cálculo usa a rede montada pela geometria; só as ligações `Rejeitada` alteram o cálculo.
+
+## Revisão de engenharia (0.34)
+
+- **Bomba a confirmar:** quando o ponto de 150% da vazão fica além da curva do catálogo, a altura é extrapolada. A bomba deixa de
+  "atender" e passa a "A confirmar", com a curva de ensaio do fabricante (NBR 16704, 4.5). Na tela aparece com "?".
+- **Montagem da rede:** no 3D, "Colorir → Montagem da rede" mostra o que o cálculo ligou por contato (cinza), o que ligou por
+  proximidade (laranja), ligações incompletas (vermelho) e pontas de tubo sem nada ligado (bolinhas vermelhas; as pontas em bicos
+  fora da área não contam). As propriedades de cada elemento dizem como ele foi ligado e a distância. Confira antes de aceitar o resultado.
+- **Solucionador esparso:** o sistema de cada iteração é resolvido por gradiente conjugado com matriz esparsa; acabou o limite de
+  4.000 nós da matriz densa. No IFC modelo o resultado é o mesmo da versão anterior (17,27 L/s; 53,06 m).

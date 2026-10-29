@@ -30,9 +30,15 @@ internal sealed record CatalogPump(string Id, string Manufacturer, string Model,
 
 internal sealed record PumpCheck(string Rule, string Requirement, string Value, bool Pass);
 
-internal sealed record PumpEvaluation(CatalogPump Pump, PumpCandidateResult Result, bool Meets, bool Extrapolated150, double Head150_m, PumpCheck[] Checks)
+// Meets só quando todas as verificações passam com valores do catálogo. Se a única dúvida é o ponto de 150% além da
+// curva tabelada (altura estimada por extrapolação), a bomba fica "a confirmar" com a curva de ensaio do fabricante.
+internal sealed record PumpEvaluation(CatalogPump Pump, PumpCandidateResult Result, bool PassesAll, bool Extrapolated150, double Head150_m, PumpCheck[] Checks)
 {
-    public string Reasons => Meets ? (Extrapolated150 ? "Atende (150% extrapolado da curva)" : "Atende")
+    public bool Meets => PassesAll && !Extrapolated150;
+    public bool Pending => PassesAll && Extrapolated150;
+    public string Status => Meets ? "Sim" : Pending ? "A confirmar" : "Não";
+    public string Reasons => Meets ? "Atende"
+        : Pending ? "A confirmar: 150% da vazão fora da curva do catálogo (altura extrapolada); pedir a curva de ensaio ao fabricante"
         : string.Join("; ", Checks.Where(check => !check.Pass).Select(check => check.Rule));
 }
 
@@ -83,7 +89,7 @@ internal static class PumpSelection
 
     // Ordem: atende, linha BPI (específica para incêndio), menor potência, menor folga de pressão.
     public static PumpEvaluation[] Rank(IEnumerable<PumpEvaluation> evaluations) => evaluations
-        .OrderByDescending(item => item.Meets)
+        .OrderByDescending(item => item.Meets).ThenByDescending(item => item.Pending)
         .ThenByDescending(item => item.Pump.Model.StartsWith("BPI", StringComparison.OrdinalIgnoreCase))
         .ThenBy(item => item.Pump.Power_cv)
         .ThenBy(item => double.IsNaN(item.Result.MinimumSprinklerPressure_mca) ? double.MaxValue : item.Result.MinimumSprinklerPressure_mca)
@@ -106,7 +112,7 @@ internal static class PumpSelection
         foreach (var item in ranked)
         {
             var r = item.Result;
-            await writer.WriteLineAsync(string.Join(";", Q(item.Pump.Id), item.Meets ? "Sim" : "Não", Q(item.Pump.Model), Q(item.Pump.Family), item.Pump.CatalogPage,
+            await writer.WriteLineAsync(string.Join(";", Q(item.Pump.Id), item.Status, Q(item.Pump.Model), Q(item.Pump.Family), item.Pump.CatalogPage,
                 N(item.Pump.Power_cv, "0.##"), item.Pump.Impeller_mm is double rotor ? N(rotor, "0") : "", item.Pump.Suction_in is double s ? N(s, "0.##") : "",
                 item.Pump.Discharge_in is double d ? N(d, "0.##") : "", N(r.Flow_l_s * 3.6), N(r.Head_m), N(r.MinimumSprinklerPressure_mca), N(r.SuctionPressure_mca),
                 N(r.DischargePressure_mca), N(item.Pump.Shutoff_m), N(1.4 * r.Head_m), N(item.Head150_m), N(0.65 * r.Head_m), Q(item.Reasons)));
