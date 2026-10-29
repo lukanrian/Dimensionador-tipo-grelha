@@ -19,7 +19,10 @@ dotnet publish $readerProject --configuration Release --runtime win-x64 --self-c
 if ($LASTEXITCODE -ne 0) { throw 'Falha ao publicar o leitor IFC.' }
 
 Copy-Item -Path (Join-Path $uiPublish '*') -Destination $installDir -Recurse -Force
-Copy-Item -Path $readerPublish -Destination (Join-Path $installDir 'Leitor') -Recurse -Force
+$readerInstall = Join-Path $installDir 'Leitor'
+New-Item -ItemType Directory -Force -Path $readerInstall | Out-Null
+# Copia o conteúdo (não a pasta): reinstalar a mesma versão não cria Leitor\Leitor.
+Copy-Item -Path (Join-Path $readerPublish '*') -Destination $readerInstall -Recurse -Force
 
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
