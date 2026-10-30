@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$version = '0.36'
+$version = '0.37'
 $publishRoot = Join-Path $root "dist\win-x64\$version"
 $installDir = Join-Path $env:LOCALAPPDATA "Programs\Dimensionador Tipo Grelha\$version"
 $uiProject = Join-Path $root 'Grelha.IfcInspector.UI\Grelha.IfcInspector.UI.csproj'
@@ -34,4 +34,8 @@ $shortcut.Save()
 
 Write-Host "Instalado em: $installDir"
 Write-Host "Atalho criado em: $shortcutPath"
-Start-Process -FilePath $appExe -ArgumentList $(if (Test-Path $sampleIfc) { @('"' + $sampleIfc + '"') } else { @() }) -WorkingDirectory $installDir
+if (Test-Path $sampleIfc) {
+    Start-Process -FilePath $appExe -ArgumentList ('"' + $sampleIfc + '"') -WorkingDirectory $installDir
+} else {
+    Start-Process -FilePath $appExe -WorkingDirectory $installDir
+}

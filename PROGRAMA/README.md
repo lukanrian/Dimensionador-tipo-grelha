@@ -1,4 +1,4 @@
-# Dimensionador Tipo Grelha 0.36
+# Dimensionador Tipo Grelha 0.37
 
 ## Organização das pastas
 
@@ -154,6 +154,18 @@ O 3D usa a biblioteca camera-controls 2.9.0 (MIT, em `Web/lib`) com a mesma conf
   fora da área não contam). As propriedades de cada elemento dizem como ele foi ligado e a distância. Confira antes de aceitar o resultado.
 - **Solucionador esparso:** o sistema de cada iteração é resolvido por gradiente conjugado com matriz esparsa; acabou o limite de
   4.000 nós da matriz densa. No IFC modelo o resultado é o mesmo da versão anterior (17,27 L/s; 53,06 m).
+
+## Critérios sem memorial (0.37)
+
+- O memorial PDF é opcional. Sem um PDF MEM/SPK junto ao IFC, a interface abre os critérios do projeto e deixa densidade,
+  área de operação, fator K e classificação de risco para preenchimento. "Analisar" sugere a área mais desfavorável; se já
+  houver bicos selecionados na vista 2D, calcula aquela área.
+- A área por bico é opcional e pode ser estimada pelo espaçamento medido no IFC. Confira o tipo de sprinkler e os limites
+  normativos aplicáveis antes de aceitar essa estimativa. Área por bico e área de operação são grandezas diferentes.
+- Com o memorial PDF ao lado do IFC, o botão "Calcular com a área do memorial (PDF)" refaz o cálculo com a área, os bicos e
+  os critérios do memorial, como antes.
+- Ao abrir um IFC ainda não analisado, a rede é lida para exibição (opção `--geometria` do leitor), com a geometria original do
+  IFC, antes de qualquer cálculo.
 
 ## Convergência garantida do solucionador (0.36)
 

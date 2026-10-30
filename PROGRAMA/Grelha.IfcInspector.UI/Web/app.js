@@ -459,8 +459,23 @@ function areaChanged() {
     const area = num($("aArea").value); if (area) info += ` Área por bico: ${fmt(area / n)} m².`;
   }
   $("areaInfo").textContent = n ? info : "Na vista 2D, use \"Selecionar área\" e arraste sobre os bicos.";
-  $("btnCalcArea").disabled = n === 0;
+  updateAreaActions();
   shapeCheck();
+}
+function validAreaCriteria() {
+  const required = ["aDensidade", "aArea", "aK"].every((id) => num($(id).value) > 0) && $("aRisco").value !== "";
+  const optional = ["aPressao", "aPorBico"].every((id) => !$(id).value.trim() || num($(id).value) > 0);
+  return required && optional;
+}
+function updateAreaActions() {
+  const valid = validAreaCriteria();
+  $("btnAutoArea").disabled = !valid;
+  $("btnCalcArea").disabled = !valid || state.area.size === 0;
+}
+function requireAreaCriteria() {
+  if (validAreaCriteria()) return true;
+  $("status").textContent = "Preencha densidade, área de operação, fator K e classificação de risco com valores válidos.";
+  return false;
 }
 // NBR 10897 (cálculo hidráulico): área retangular com lado paralelo aos ramais ≥ 1,2 √A, bicos = A ÷ área por bico, área contígua.
 function shapeCheck() {
@@ -485,7 +500,7 @@ function shapeCheck() {
 function setSelecting(on) {
   state.selecting = on; $("btnSelArea").classList.toggle("ativo", on);
   renderer.domElement.style.cursor = on ? "crosshair" : "";
-  if (on) { document.querySelector('input[name=origemArea][value="2d"]').checked = true; areaSource(); }
+  if (on) areaSource();
 }
 
 function highlight(o, on) { setColor(o, on ? new THREE.Color(0x00c2ff) : o.baseColor); }
@@ -563,12 +578,12 @@ function pumpsTable() {
 }
 
 async function loadResults(base) {
-  const sameModel = state.dataBase === base && ifcGeometry;
+  const sameModel = state.dataBase === base;
   state.dataBase = base;
   try {
     const r = await fetch(`${base}.network-3d.json?t=${Date.now()}`); if (!r.ok) throw new Error("sem rede 3D");
     state.network = await r.json();
-    if (!sameModel) { build(state.network); ifcGeometry = await loadIfcGeometry(base, state.network.Origin); }
+    if (!sameModel) { ifcGeometry = null; build(state.network); ifcGeometry = await loadIfcGeometry(base, state.network.Origin); }
     build(state.network);
   } catch { state.network = null; }
   try { const r = await fetch(`${base}.pump-selection.csv?t=${Date.now()}`); state.pumps = r.ok ? parseCsv(await r.text()) : []; } catch { state.pumps = []; }
@@ -576,9 +591,9 @@ async function loadResults(base) {
   try {
     const r = await fetch(`${base}.operation-area.json?t=${Date.now()}`);
     const fromArea = /^Área /.test(state.network?.Summary?.OperationArea ?? "");
-    if (r.ok && (fromArea || document.querySelector('input[name=origemArea][value="2d"]').checked)) {
+    if (r.ok) {
       const a = await r.json(); state.area = new Set(a.SprinklerIds ?? []);
-      if (fromArea) { document.querySelector('input[name=origemArea][value="2d"]').checked = true; $("areaManual").hidden = false; send({ cmd: "areaSource", manual: true }); }
+      if (fromArea) { $("areaManual").hidden = false; send({ cmd: "areaSource", manual: true }); }
     }
   } catch {}
   try { const r = await fetch(`${base}.area-candidates.json?t=${Date.now()}`); state.candidates = r.ok ? await r.json() : null; } catch { state.candidates = null; }
@@ -605,9 +620,14 @@ function candidatesList() {
   });
 }
 function areaSource() {
-  const manual = document.querySelector("input[name=origemArea]:checked").value === "2d";
-  $("areaManual").hidden = !manual;
-  send({ cmd: "areaSource", manual });
+  $("areaManual").hidden = false;
+  send({ cmd: "areaSource", manual: true });
+}
+function setAreaMode() {
+  if (!state.path) return;
+  $("areaManual").hidden = false;
+  areaSource();
+  updateAreaActions();
 }
 function areaPayload() {
   return { Name: `Área escolhida no 2D (${state.area.size} bicos)`, SprinklerIds: [...state.area], Density_mm_min: num($("aDensidade").value), DesignArea_m2: num($("aArea").value),
@@ -625,7 +645,11 @@ document.addEventListener("click", (e) => { for (const id of ["popArquivos", "po
 document.querySelectorAll("[data-abrir]").forEach((b) => b.onclick = () => { $("popArquivos").hidden = true; send({ cmd: "open", kind: b.dataset.abrir }); });
 const runArgs = () => ({ source: $("alimentacao").value.trim(), tank: $("nivel").value.trim() });
 $("btnAbrir").onclick = () => send({ cmd: "browse" });
-$("btnAnalisar").onclick = () => send({ cmd: "analyze", ...runArgs() });
+$("btnAnalisar").onclick = () => {
+  if (!requireAreaCriteria()) return;
+  const { SprinklerIds, Name, ...criteria } = areaPayload();
+  send({ cmd: "analyzeAuto", area: criteria, ...runArgs() });
+};
 $("btnBomba").onclick = () => send({ cmd: "selectPump", id: state.selectedPumpId });
 $("btnMemorial").onclick = () => state.selectedPumpId && send({ cmd: "memorial", id: state.selectedPumpId, ...runArgs() });
 $("btnCurva").onclick = () => send({ cmd: "open", kind: "pumpcurve" });
@@ -636,15 +660,19 @@ document.querySelectorAll("[data-vista]").forEach((b) => b.onclick = () => setMo
 $("pavimento").onchange = () => { applyVisibility(); fit(floorBox(), 1.1); };
 $("btnSelArea").onclick = () => setSelecting(!state.selecting);
 $("btnLimparArea").onclick = () => { state.area.clear(); areaChanged(); };
-document.querySelectorAll("input[name=origemArea]").forEach((r) => r.onchange = areaSource);
 $("aArea").oninput = areaChanged;
 $("aPorBico").oninput = areaChanged;
+for (const id of ["aDensidade", "aK", "aPressao"]) $(id).oninput = updateAreaActions;
+$("aRisco").onchange = updateAreaActions;
 $("btnAutoArea").onclick = () => {
+  if (!requireAreaCriteria()) return;
   const { SprinklerIds, Name, ...criteria } = areaPayload();
-  document.querySelector('input[name=origemArea][value="2d"]').checked = true; $("areaManual").hidden = false;
+  $("areaManual").hidden = false;
+  areaSource();
   send({ cmd: "analyzeAuto", area: criteria, ...runArgs() });
 };
-$("btnCalcArea").onclick = () => state.area.size && send({ cmd: "analyzeArea", area: areaPayload(), ...runArgs() });
+$("btnMemorialArea").onclick = () => send({ cmd: "analyzeMemorial", ...runArgs() });
+$("btnCalcArea").onclick = () => requireAreaCriteria() && state.area.size && send({ cmd: "analyzeArea", area: areaPayload(), ...runArgs() });
 $("colorir").onchange = () => { recolor(); applyVisibility(); };
 for (const id of ["vConexoes", "vValvulas", "vBicos", "vSemVazao"]) $(id).onchange = applyVisibility;
 $("vReal").onchange = () => state.network && build(state.network);
@@ -661,8 +689,9 @@ try { if (localStorage.getItem("grelha.tema") === "escuro") { document.documentE
 function log(line) { const s = $("saida"); s.textContent += line + "\n"; s.scrollTop = s.scrollHeight; }
 host?.addEventListener("message", (e) => {
   const m = e.data;
-  if (m.type === "init") { $("versao").textContent = `versão ${m.version} · sprinklers · cálculo + bomba + memorial`; setFile(m.path); if (m.base) loadResults(m.base); }
-  else if (m.type === "file") { setFile(m.path); state.network = null; state.pumps = []; state.dataBase = ""; ifcGeometry = null; state.area.clear(); world.clear(); objects = []; batch = null; $("vazio3d").hidden = false; summary(); pumpsTable(); updateButtons(); }
+  if (m.type === "init" || m.type === "file") $("btnMemorialArea").hidden = !m.memorial;
+  if (m.type === "init") { $("versao").textContent = `versão ${m.version} · sprinklers · cálculo + bomba + memorial`; setFile(m.path); setAreaMode(); if (m.base) loadResults(m.base); }
+  else if (m.type === "file") { setFile(m.path); state.network = null; state.pumps = []; state.dataBase = ""; ifcGeometry = null; state.area.clear(); world.clear(); objects = []; batch = null; $("vazio3d").hidden = false; summary(); pumpsTable(); updateButtons(); setAreaMode(); }
   else if (m.type === "log") log(m.line);
   else if (m.type === "status") $("status").textContent = m.text;
   else if (m.type === "busy") { $("ocupado").hidden = !m.on; if (m.text) $("ocupadoTxt").textContent = m.text; }
@@ -671,6 +700,7 @@ host?.addEventListener("message", (e) => {
 });
 function setFile(path) { state.path = path || ""; $("arquivo").textContent = path ? path.split(/[\\/]/).pop() : "nenhum IFC selecionado"; $("btnAnalisar").disabled = !path; }
 updateButtons();
+updateAreaActions();
 send({ cmd: "ready" });
 // Fora da janela (navegador comum, para conferência): ?base=<caminho do IFC sem extensão> carrega os resultados.
 if (!host) { const base = new URLSearchParams(location.search).get("base"); if (base) { setFile(base + ".ifc"); loadResults(base); } }

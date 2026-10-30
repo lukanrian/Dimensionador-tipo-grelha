@@ -50,23 +50,21 @@
           <label class="campo">Nível do reservatório acima da tomada (m)<input id="nivel" value="0"></label>
           <button class="btn mini" id="btnCurva">Curva da bomba (CSV)…</button>
           <table class="kv"><tr><th colspan="2">Área de operação</th></tr></table>
-          <div class="opcoes">
-            <label><input type="radio" name="origemArea" value="memorial" checked> Do memorial (PDF ao lado do IFC)</label>
-            <label><input type="radio" name="origemArea" value="2d"> Escolhida no 2D</label>
-          </div>
-          <div id="areaManual" hidden>
-            <p class="vazio" id="areaInfo">Na vista 2D, use "Selecionar área" e arraste sobre os bicos.</p>
+          <div id="areaManual">
+            <p class="vazio" id="areaInfo">Preencha os critérios; ao clicar em Analisar, o programa avaliará a rede e indicará a área mais desfavorável.</p>
             <div class="duas">
-              <label class="campo">Densidade (mm/min)<input id="aDensidade" value="6,1"></label>
-              <label class="campo">Área de aplicação (m²)<input id="aArea" value="140"></label>
-              <label class="campo">Fator K (L/min/bar½)<input id="aK" value="80"></label>
-              <label class="campo">Pressão mínima (m.c.a., opcional)<input id="aPressao" value=""></label>
-              <label class="campo">Área por bico (m², opcional)<input id="aPorBico" value="" placeholder="pelo espaçamento"></label>
+              <label class="campo">Densidade de projeto (mm/min)<input id="aDensidade" placeholder="Preencher"></label>
+              <label class="campo">Área de operação (m²)<input id="aArea" placeholder="Preencher"></label>
+              <label class="campo">Fator K (L/min/bar½)<input id="aK" placeholder="Preencher"></label>
+              <label class="campo">Pressão mínima (m.c.a., opcional)<input id="aPressao" placeholder="Padrão normativo"></label>
+              <label class="campo">Área por bico (m², opcional)<input id="aPorBico" placeholder="Estimativa pelo IFC"></label>
             </div>
-            <label class="campo">Classificação de risco<select id="aRisco"><option>risco leve</option><option selected>risco ordinário grupo I</option><option>risco ordinário grupo II</option><option>risco extraordinário grupo I</option><option>risco extraordinário grupo II</option></select></label>
+            <label class="campo">Classificação de risco<select id="aRisco"><option value="" selected>Selecione a classificação</option><option>risco leve</option><option>risco ordinário grupo I</option><option>risco ordinário grupo II</option><option>risco extraordinário grupo I</option><option>risco extraordinário grupo II</option></select></label>
+            <p class="vazio">Área por bico pode ser estimada pelo espaçamento do IFC, mas deve respeitar os limites normativos do tipo de sprinkler e da instalação. A área de operação é outro critério e deve ser informada acima.</p>
             <div id="areaForma"></div>
             <button class="btn primario" id="btnCalcArea" disabled>Calcular com a área escolhida</button>
             <button class="btn" id="btnAutoArea" style="width:100%;margin-top:6px">Sugerir a área mais desfavorável</button>
+            <button class="btn" id="btnMemorialArea" hidden style="width:100%;margin-top:6px" title="Usa a área de operação, os bicos e os critérios do memorial PDF que está ao lado do IFC">Calcular com a área do memorial (PDF)</button>
             <div id="candidatas"></div>
           </div>
           <div id="resumo" class="resumo"><p class="vazio">Abra um IFC e clique em Analisar.</p></div>

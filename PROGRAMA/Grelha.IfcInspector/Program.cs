@@ -298,6 +298,8 @@ try
         tankLevelOption = ParseDecimal(args[tankOptionIndex + 1]);
         args = args.Where((_, index) => index != tankOptionIndex && index != tankOptionIndex + 1).ToArray();
     }
+    var geometryOnly = args.Contains("--geometria");
+    if (geometryOnly) args = args.Where(argument => argument != "--geometria").ToArray();
     if (args.Length != 1 || !File.Exists(args[0]))
     {
         const string message = "Uso: Grelha.IfcInspector <arquivo.ifc> [--alimentacao <GlobalId do tubo>] [--nivel-reservatorio <m acima da tomada>] [--memorial <Id da bomba>] [--area <área de operação .json>] [--area-auto <critérios .json>]. Arquivo IFC ausente ou não encontrado.";
@@ -318,9 +320,32 @@ try
     var lengthUnit = project.UnitsInContext.Units.OfType<IIfcSIUnit>().FirstOrDefault(unit => unit.UnitType == IfcUnitEnum.LENGTHUNIT)
         ?? throw new InvalidDataException("Unidade IFC de comprimento SI não encontrada.");
     var unitsPerMeter = UnitsPerMeter(lengthUnit);
+    // IFC só com a rede de sprinklers (geometria original dos elementos) para o visualizador 3D; refeito quando o IFC
+    // ou o próprio leitor mudam (uma versão nova do programa pode extrair a rede de outro jeito).
+    async Task WriteNetworkIfcAsync()
+    {
+        var networkIfc = Path.ChangeExtension(input, ".network.ifc");
+        var reader = Path.Combine(AppContext.BaseDirectory, "Grelha.IfcInspector.dll");
+        var stale = !File.Exists(networkIfc) || File.GetLastWriteTimeUtc(networkIfc) < File.GetLastWriteTimeUtc(input)
+            || (File.Exists(reader) && File.GetLastWriteTimeUtc(networkIfc) < File.GetLastWriteTimeUtc(reader));
+        if (!stale) return;
+        var networkValves = model.Instances.OfType<IIfcValve>().Where(item => Network(item) is null or "Sprinklers" && item.ObjectPlacement is not null);
+        var networkPumps = model.Instances.OfType<IIfcPump>().Where(item => Network(item) is null or "Sprinklers" && item.ObjectPlacement is not null);
+        using var subset = IfcStore.Create(model.SchemaVersion, Xbim.IO.XbimStoreType.InMemoryModel);
+        using (var transaction = subset.BeginTransaction("Rede de sprinklers"))
+        {
+            var map = new Xbim.Common.XbimInstanceHandleMap(model, subset);
+            subset.InsertCopy(project, map, null, false, true);
+            foreach (var element in pipes.Cast<IIfcProduct>().Concat(fittings).Concat(terminals).Concat(networkValves).Concat(networkPumps))
+                subset.InsertCopy(element, map, null, false, true);
+            transaction.Commit();
+        }
+        subset.SaveAs(networkIfc, Xbim.IO.StorageType.Ifc);
+        await LogAsync($"IFC da rede para o visualizador: {networkIfc} ({new FileInfo(networkIfc).Length / 1048576.0:0.0} MB).");
+    }
     var sprinklerAnchors = sprinklers.Where(item => item.ObjectPlacement is not null)
         .Select(item => (Item: item, Point: Origin(item))).ToList();
-    var memorialSource = ReadMemorial(Path.GetDirectoryName(input)!);
+    var memorialSource = geometryOnly ? null : ReadMemorial(Path.GetDirectoryName(input)!);
     var memorial = memorialSource?.Data;
     // Área de operação escolhida na janela (modo 2D): substitui a tabela de bicos do memorial; o memorial PDF, se houver, só fornece os comprimentos equivalentes.
     var areaMode = areaOption is not null;
@@ -377,9 +402,9 @@ try
             }
         }
     }
-    if (operationArea.Length > 0 && (bestAlignment.Matches != operationArea.Length || bestAlignment.Rms > 0.1 * unitsPerMeter))
+    if (!geometryOnly && operationArea.Length > 0 && (bestAlignment.Matches != operationArea.Length || bestAlignment.Rms > 0.1 * unitsPerMeter))
         throw new InvalidDataException("Não foi possível alinhar com confiança os sprinklers do memorial ao IFC.");
-    var operationSprinklers = operationArea.Select((point, index) =>
+    var operationSprinklers = geometryOnly ? [] : operationArea.Select((point, index) =>
     {
         var match = sprinklerAnchors
             .Select(anchor =>
@@ -406,7 +431,7 @@ try
             MatchDistance_ifc_units = match.Distance
         };
     }).ToArray();
-    if (operationSprinklers.Select(sprinkler => sprinkler.IfcGlobalId).Distinct(StringComparer.Ordinal).Count() != operationSprinklers.Length)
+    if (!geometryOnly && operationSprinklers.Select(sprinkler => sprinkler.IfcGlobalId).Distinct(StringComparer.Ordinal).Count() != operationSprinklers.Length)
         throw new InvalidDataException("Dois bicos do memorial foram associados ao mesmo sprinkler IFC.");
     // shortcut: 20 cm is an audit window only; use fitting-specific ports before treating proximity as a connection.
     var searchRadius = 0.20 * unitsPerMeter;
@@ -432,7 +457,38 @@ try
         pipeEnds.Add((pipe, 1, end));
     }
 
-    string? operationAreaPath = memorial is null ? null : Path.ChangeExtension(input, ".operation-area-candidates.csv");
+    if (geometryOnly)
+    {
+        if (pipeEnds.Count < 2) throw new InvalidDataException("Não foi possível extrair a geometria dos tubos da rede Sprinklers.");
+        var unitScale = 1 / unitsPerMeter;
+        var minX = pipeEnds.Min(end => end.Point.X);
+        var minY = pipeEnds.Min(end => end.Point.Y);
+        var minZ = pipeEnds.Min(end => end.Point.Z);
+        double[] Xyz(XbimPoint3D point) => [Math.Round((point.X - minX) * unitScale, 3), Math.Round((point.Y - minY) * unitScale, 3), Math.Round((point.Z - minZ) * unitScale, 3)];
+        var network = new
+        {
+            Version = version,
+            Ifc = Path.GetFileName(input),
+            Origin = new { X = minX * unitScale, Y = minY * unitScale, Z = minZ * unitScale },
+            Summary = new { OperationArea = "", Density_mm_min = (double?)null, DesignArea_m2 = (double?)null, SprinklerCount = 0, Warnings = Array.Empty<string>() },
+            Pipes = pipeEnds.Where((_, index) => index % 2 == 0).Select((start, index) =>
+            {
+                var end = pipeEnds[2 * index + 1];
+                return new { Id = Id(start.Pipe), Type = TypeName(start.Pipe), D_mm = Math.Round(InnerDiameter(start.Pipe) / unitsPerMeter * 1000, 1), L_m = Math.Round((end.Point - start.Point).Length * unitScale, 3), A = Xyz(start.Point), B = Xyz(end.Point), Q_l_s = (double?)null, V_m_s = (double?)null, Loss_m = (double?)null, Leq_m = (double?)null, Join = (string?)null, JoinDist_m = (double?)null };
+            }),
+            Sprinklers = sprinklerAnchors.Select(anchor => new { Id = Id(anchor.Item), Type = TypeName(anchor.Item), Storey = StoreyOf(anchor.Item), P = Xyz(anchor.Point), Number = (int?)null, Pressure_mca = (double?)null, Q_l_s = (double?)null, Join = (string?)null, JoinDist_m = (double?)null }),
+            Layouts = Array.Empty<object>(),
+            Devices = fittings.Where(item => item.ObjectPlacement is not null).Select(item => new { Id = Id(item), Kind = "Fitting", Type = TypeName(item), Indication = "", P = Xyz(Origin(item)), Active = false, Join = (string?)null, JoinDist_m = (double?)null })
+                .Concat(terminals.Where(item => !sprinklers.Contains(item) && item.ObjectPlacement is not null).Select(item => new { Id = Id(item), Kind = "Device", Type = TypeName(item), Indication = "", P = Xyz(Origin(item)), Active = false, Join = (string?)null, JoinDist_m = (double?)null })),
+            DeadEnds = Array.Empty<object>()
+        };
+        await File.WriteAllTextAsync(Path.ChangeExtension(input, ".network-3d.json"), JsonSerializer.Serialize(network));
+        await WriteNetworkIfcAsync();
+        await LogAsync($"Visualização rápida pronta: {pipes.Count} tubos, {fittings.Count} conexões e {sprinklerAnchors.Count} sprinklers.");
+        return 0;
+    }
+
+    string? operationAreaPath = memorial is null || geometryOnly ? null : Path.ChangeExtension(input, ".operation-area-candidates.csv");
     var operationAreaPipeNumbers = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
     if (operationAreaPath is not null)
     await using (var writer = new StreamWriter(operationAreaPath, false, System.Text.Encoding.UTF8))
@@ -838,9 +894,9 @@ try
         layouts[group.Key] = OperationAreas.Layout(group.Key, group.ToList(), angle, unitsPerMeter);
     }
     string? areaCandidatesPath = null;
-    if (areaAutoOption is not null && memorial is null)
+    if (!geometryOnly && areaAutoOption is not null && memorial is null)
         memorial = new MemorialData("Área mais desfavorável", "Hazen-Williams", 6.1, 140, 0, 80, 0, double.NaN, double.NaN, double.NaN, double.NaN, [], [], "");
-    if (memorial is not null)
+    if (memorial is not null && !geometryOnly)
     {
         try
         {
@@ -1041,27 +1097,8 @@ try
                         .Select(item => new { item.Id, P = Xyz(item.Point) })
                 };
                 await File.WriteAllTextAsync(Path.ChangeExtension(input, ".network-3d.json"), JsonSerializer.Serialize(network, new JsonSerializerOptions { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
+                await WriteNetworkIfcAsync();
 
-                // IFC só com a rede de sprinklers (geometria original dos elementos) para o visualizador; refeito quando o IFC
-                // ou o próprio leitor mudam (uma versão nova do programa pode extrair a rede de outro jeito).
-                var networkIfc = Path.ChangeExtension(input, ".network.ifc");
-                var reader = Path.Combine(AppContext.BaseDirectory, "Grelha.IfcInspector.dll");
-                var stale = !File.Exists(networkIfc) || File.GetLastWriteTimeUtc(networkIfc) < File.GetLastWriteTimeUtc(input)
-                    || (File.Exists(reader) && File.GetLastWriteTimeUtc(networkIfc) < File.GetLastWriteTimeUtc(reader));
-                if (stale)
-                {
-                    using var subset = IfcStore.Create(model.SchemaVersion, Xbim.IO.XbimStoreType.InMemoryModel);
-                    using (var transaction = subset.BeginTransaction("Rede de sprinklers"))
-                    {
-                        var map = new Xbim.Common.XbimInstanceHandleMap(model, subset);
-                        subset.InsertCopy(project, map, null, false, true);
-                        foreach (var element in pipes.Cast<IIfcProduct>().Concat(fittings).Concat(terminals).Concat(valves).Concat(pumps))
-                            subset.InsertCopy(element, map, null, false, true);
-                        transaction.Commit();
-                    }
-                    subset.SaveAs(networkIfc, Xbim.IO.StorageType.Ifc);
-                    await LogAsync($"IFC da rede para o visualizador: {networkIfc} ({new FileInfo(networkIfc).Length / 1048576.0:0.0} MB).");
-                }
             }
             if (memorialPumpOption is not null)
             {

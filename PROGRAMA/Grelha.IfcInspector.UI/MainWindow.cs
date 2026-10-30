@@ -9,7 +9,7 @@ namespace Grelha.IfcInspector.UI;
 // Janela principal: interface web (painel, visualizador 3D da rede) numa WebView2; o cálculo roda no leitor (processo separado).
 internal sealed class MainWindow : Form
 {
-    private const string Version = "0.36";
+    private const string Version = "0.37";
     private readonly WebView2 web = new() { Dock = DockStyle.Fill };
     private readonly string projectRoot;
     private readonly string cliProject;
@@ -89,7 +89,7 @@ internal sealed class MainWindow : Form
         switch (S("cmd"))
         {
             case "ready":
-                Post(new { type = "init", version = Version, path = ifcPath, @base = File.Exists(Path.ChangeExtension(ifcPath, ".network-3d.json")) ? DataBase() : null });
+                Post(new { type = "init", version = Version, path = ifcPath, memorial = HasMemorial(), @base = File.Exists(Path.ChangeExtension(ifcPath, ".network-3d.json")) ? DataBase() : null });
                 break;
             case "browse":
                 using (var dialog = new OpenFileDialog { Title = "Selecionar modelo IFC", Filter = "Modelos IFC (*.ifc;*.ifczip)|*.ifc;*.ifczip|Todos os arquivos (*.*)|*.*", CheckFileExists = true })
@@ -98,11 +98,16 @@ internal sealed class MainWindow : Form
                     if (dialog.ShowDialog(this) != DialogResult.OK) break;
                     ifcPath = dialog.FileName;
                     MapData();
-                    Post(new { type = "file", path = ifcPath });
+                    Post(new { type = "file", path = ifcPath, memorial = HasMemorial() });
                     if (File.Exists(Path.ChangeExtension(ifcPath, ".network-3d.json"))) Post(new { type = "done", @base = DataBase() });
+                    else _ = RunReaderAsync("", "", null, geometryOnly: true);
                 }
                 break;
             case "analyze":
+                await RunReaderAsync(S("source"), S("tank"), null);
+                break;
+            case "analyzeMemorial":
+                useChosenArea = false;
                 await RunReaderAsync(S("source"), S("tank"), null);
                 break;
             case "memorial":
@@ -151,14 +156,19 @@ internal sealed class MainWindow : Form
         await RunReaderAsync("", "", id);
     }
 
-    private async Task RunReaderAsync(string source, string tank, string? memorialPumpId, string? autoAreaCriteria = null)
+    // Memorial do projeto (PDF com MEM e SPK no nome) ao lado do IFC, o mesmo critério do leitor.
+    private bool HasMemorial() => Path.GetDirectoryName(ifcPath) is { } folder && Directory.Exists(folder)
+        && Directory.GetFiles(folder, "*.pdf").Any(file => Path.GetFileName(file).Contains("MEM", StringComparison.OrdinalIgnoreCase)
+            && Path.GetFileName(file).Contains("SPK", StringComparison.OrdinalIgnoreCase));
+
+    private async Task RunReaderAsync(string source, string tank, string? memorialPumpId, string? autoAreaCriteria = null, bool geometryOnly = false)
     {
         if (!File.Exists(ifcPath)) { MessageBox.Show(this, "Selecione um arquivo IFC existente.", "Arquivo não encontrado", MessageBoxButtons.OK, MessageBoxIcon.Warning); return; }
         if (bundledReader is null && !File.Exists(cliProject)) { MessageBox.Show(this, $"Não encontrei o projeto de leitura do IFC:\n{cliProject}", "Projeto ausente", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
         if (activeProcess is not null) return;
 
         var startedAt = DateTime.Now;
-        var text = autoAreaCriteria is not null ? "Montando as áreas de operação candidatas e calculando cada uma na rede (cerca de 2 minutos)…" : memorialPumpId is null ? "Lendo o IFC, calculando a rede e avaliando as bombas do catálogo (cerca de 1 minuto)…" : $"Recalculando com a bomba {memorialPumpId} e gerando o memorial…";
+        var text = geometryOnly ? "Lendo o IFC para exibir a rede…" : autoAreaCriteria is not null ? "Montando as áreas de operação candidatas e calculando cada uma na rede (cerca de 2 minutos)…" : memorialPumpId is null ? "Lendo o IFC, calculando a rede e avaliando as bombas do catálogo (cerca de 1 minuto)…" : $"Recalculando com a bomba {memorialPumpId} e gerando o memorial…";
         Post(new { type = "busy", on = true, text });
         Post(new { type = "status", text });
         var startInfo = new ProcessStartInfo(bundledReader ?? "dotnet")
@@ -174,6 +184,7 @@ internal sealed class MainWindow : Form
         if (tank.Length > 0 && tank != "0") { startInfo.ArgumentList.Add("--nivel-reservatorio"); startInfo.ArgumentList.Add(tank); }
         if (memorialPumpId is not null) { startInfo.ArgumentList.Add("--memorial"); startInfo.ArgumentList.Add(memorialPumpId); }
         if (autoAreaCriteria is not null) { startInfo.ArgumentList.Add("--area-auto"); startInfo.ArgumentList.Add(autoAreaCriteria); }
+        if (geometryOnly) startInfo.ArgumentList.Add("--geometria");
         else if (useChosenArea && File.Exists(AreaFile())) { startInfo.ArgumentList.Add("--area"); startInfo.ArgumentList.Add(AreaFile()); }
         startInfo.Environment["GRELHA_LOG_DIR"] = logDirectory;
         startInfo.Environment["GRELHA_LOG_PATH"] = lastLogPath;
@@ -194,7 +205,8 @@ internal sealed class MainWindow : Form
             Post(new { type = "busy", on = false });
             if (exitCode != 0) { Post(new { type = "status", text = $"A análise terminou com erro ({exitCode}). Veja a saída e o log." }); return; }
             Post(new { type = "done", @base = DataBase() });
-            if (memorialPumpId is null) Post(new { type = "status", text = $"Análise concluída às {DateTime.Now:HH:mm}." });
+            if (geometryOnly) Post(new { type = "status", text = "IFC carregado. Preencha os critérios e clique em Analisar para dimensionar." });
+            else if (memorialPumpId is null) Post(new { type = "status", text = $"Análise concluída às {DateTime.Now:HH:mm}." });
             else
             {
                 var memorial = LatestMemorial(startedAt);
