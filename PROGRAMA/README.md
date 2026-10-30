@@ -1,4 +1,4 @@
-# Dimensionador Tipo Grelha 0.37
+# Dimensionador Tipo Grelha 0.44
 
 ## Organização das pastas
 
@@ -155,7 +155,7 @@ O 3D usa a biblioteca camera-controls 2.9.0 (MIT, em `Web/lib`) com a mesma conf
 - **Solucionador esparso:** o sistema de cada iteração é resolvido por gradiente conjugado com matriz esparsa; acabou o limite de
   4.000 nós da matriz densa. No IFC modelo o resultado é o mesmo da versão anterior (17,27 L/s; 53,06 m).
 
-## Critérios sem memorial (0.37)
+## Critérios sem memorial (0.44; publicada antes como 0.37)
 
 - O memorial PDF é opcional. Sem um PDF MEM/SPK junto ao IFC, a interface abre os critérios do projeto e deixa densidade,
   área de operação, fator K e classificação de risco para preenchimento. "Analisar" sugere a área mais desfavorável; se já
