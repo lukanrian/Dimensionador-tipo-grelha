@@ -316,7 +316,9 @@ try
         foreach (var stale in new[] { ".pump-selection.csv", ".system-curve.csv" })
             File.Delete(OutputPaths.PathFor(input, stale));
     await LogAsync($"Abrindo IFC: {input}");
-    using var model = IfcStore.Open(input, ifcDatabaseSizeThreshHold: 64);
+    // IFC de até 1 GB é lido na memória (no modelo de 176 MB: rede pronta em 23 s, contra 36 s com o banco em disco, e ~0,3 GB a mais de RAM);
+    // acima disso, banco em disco. GRELHA_IFC_DB_MB muda o limite.
+    using var model = IfcStore.Open(input, ifcDatabaseSizeThreshHold: double.Parse(Environment.GetEnvironmentVariable("GRELHA_IFC_DB_MB") ?? "1024", CultureInfo.InvariantCulture));
 
     var pipes = model.Instances.OfType<IIfcPipeSegment>().Where(item => Network(item) == "Sprinklers").ToList();
     var fittings = model.Instances.OfType<IIfcPipeFitting>().Where(item => Network(item) == "Sprinklers").ToList();

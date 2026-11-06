@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title Instalando Dimensionador Tipo Grelha 0.48
+title Instalando Dimensionador Tipo Grelha 0.49
 powershell.exe -NoProfile -File "%~dp0Instalar_Grelha.ps1"
 if errorlevel 1 (
     echo.

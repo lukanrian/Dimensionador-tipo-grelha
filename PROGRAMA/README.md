@@ -1,4 +1,4 @@
-# Dimensionador Tipo Grelha 0.48
+# Dimensionador Tipo Grelha 0.49
 
 ## Organização das pastas
 
@@ -156,6 +156,13 @@ O 3D usa a biblioteca camera-controls 2.9.0 (MIT, em `Web/lib`) com a mesma conf
   fora da área não contam). As propriedades de cada elemento dizem como ele foi ligado e a distância. Confira antes de aceitar o resultado.
 - **Solucionador esparso:** o sistema de cada iteração é resolvido por gradiente conjugado com matriz esparsa; acabou o limite de
   4.000 nós da matriz densa. No IFC modelo o resultado é o mesmo da versão anterior (17,27 L/s; 53,06 m).
+
+## Leitura mais rápida do IFC (0.49)
+
+- IFC de até 1 GB é lido na memória, em vez do banco em disco usado acima de 64 MB. No IFC modelo (176 MB), a rede aparece
+  em cerca de 40 s depois de abrir o programa (antes 74 s) e a geometria original em cerca de 88 s (antes 166 s); a análise
+  completa caiu de 124 s para 85 s, com o mesmo resultado. Uso de memória: cerca de 2,9 GB no pico (antes 2,5 GB).
+- A variável de ambiente `GRELHA_IFC_DB_MB` muda o limite (em MB) a partir do qual o banco em disco é usado.
 
 ## Rede visível ao abrir o IFC (0.48)
 

@@ -10,7 +10,7 @@ namespace Grelha.IfcInspector.UI;
 // Janela principal: interface web (painel, visualizador 3D da rede) numa WebView2; o cálculo roda no leitor (processo separado).
 internal sealed class MainWindow : Form
 {
-    private const string Version = "0.48";
+    private const string Version = "0.49";
     private readonly WebView2 web = new() { Dock = DockStyle.Fill };
     private readonly string projectRoot;
     private readonly string cliProject;
