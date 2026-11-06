@@ -1,4 +1,4 @@
-# Dimensionador Tipo Grelha 0.46
+# Dimensionador Tipo Grelha 0.47
 
 ## Organização das pastas
 
@@ -156,6 +156,13 @@ O 3D usa a biblioteca camera-controls 2.9.0 (MIT, em `Web/lib`) com a mesma conf
   fora da área não contam). As propriedades de cada elemento dizem como ele foi ligado e a distância. Confira antes de aceitar o resultado.
 - **Solucionador esparso:** o sistema de cada iteração é resolvido por gradiente conjugado com matriz esparsa; acabou o limite de
   4.000 nós da matriz densa. No IFC modelo o resultado é o mesmo da versão anterior (17,27 L/s; 53,06 m).
+
+## Arrastar o IFC para a janela (0.47)
+
+- Arraste um arquivo `.ifc` (ou `.ifczip`) do Explorador para qualquer ponto da janela: aparece o aviso "Solte o arquivo IFC
+  para abrir" e o modelo abre como pelo botão Abrir IFC (rede salva, se for do mesmo IFC, ou leitura rápida).
+- Outros tipos de arquivo são recusados com aviso na barra de status. Durante uma análise, espere ela terminar.
+- Continua valendo arrastar o IFC sobre o atalho ou o executável do programa.
 
 ## Cálculo só pelo IFC e pela norma (0.46)
 

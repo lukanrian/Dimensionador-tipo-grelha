@@ -73,3 +73,7 @@ table.kv td { padding:5px 8px; border-top:1px solid var(--borda) } table.kv td:l
 .retangulo { position:absolute; border:1.5px dashed var(--acento); background:color-mix(in srgb, var(--acento) 12%, transparent); pointer-events:none; z-index:6 }
 .carregando { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); z-index:6; background:var(--painel); border:1px solid var(--borda); border-radius:8px; padding:10px 16px; display:flex; gap:10px; align-items:center }
 .menu-ctx { position:fixed; top:auto; right:auto; min-width:200px; z-index:60 }
+
+/* Arrastar um IFC para a janela */
+body.soltar::after { content: "Solte o arquivo IFC para abrir"; position: fixed; inset: 10px; z-index: 50; display: flex; align-items: center; justify-content: center;
+  border: 3px dashed var(--acento); border-radius: 12px; background: color-mix(in srgb, var(--acento) 12%, transparent); color: var(--acento); font-size: 22px; font-weight: 600; pointer-events: none; }

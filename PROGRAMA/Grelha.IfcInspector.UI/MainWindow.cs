@@ -10,7 +10,7 @@ namespace Grelha.IfcInspector.UI;
 // Janela principal: interface web (painel, visualizador 3D da rede) numa WebView2; o cálculo roda no leitor (processo separado).
 internal sealed class MainWindow : Form
 {
-    private const string Version = "0.46";
+    private const string Version = "0.47";
     private readonly WebView2 web = new() { Dock = DockStyle.Fill };
     private readonly string projectRoot;
     private readonly string cliProject;
@@ -60,7 +60,17 @@ internal sealed class MainWindow : Form
         core.Settings.IsStatusBarEnabled = false;
         core.SetVirtualHostNameToFolderMapping("app.grelha", Path.Combine(AppContext.BaseDirectory, "Web"), CoreWebView2HostResourceAccessKind.Allow);
         MapData();
-        core.WebMessageReceived += async (_, e) => await OnMessageAsync(e.WebMessageAsJson);
+        core.WebMessageReceived += async (_, e) =>
+        {
+            // IFC arrastado para a janela: a página manda o arquivo junto da mensagem e o caminho vem do WebView2.
+            if (e.AdditionalObjects is { Count: > 0 } objects)
+            {
+                var dropped = objects.OfType<CoreWebView2File>().Select(file => file.Path)
+                    .FirstOrDefault(path => path.EndsWith(".ifc", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".ifczip", StringComparison.OrdinalIgnoreCase));
+                if (dropped is not null) { OpenIfc(dropped); return; }
+            }
+            await OnMessageAsync(e.WebMessageAsJson);
+        };
         core.Navigate("https://app.grelha/index.html");
     }
 
@@ -82,6 +92,23 @@ internal sealed class MainWindow : Form
         web.CoreWebView2?.PostWebMessageAsJson(JsonSerializer.Serialize(message));
     }
 
+    // Abre um IFC (pelo botão Abrir IFC ou arrastado para a janela): mostra a rede salva, se for deste IFC, ou faz a leitura rápida.
+    private void OpenIfc(string path)
+    {
+        if (activeProcess is not null)
+        {
+            Post(new { type = "status", text = "Aguarde a análise em andamento terminar para abrir outro IFC." });
+            return;
+        }
+        WriteSessionLog($"Modelo IFC selecionado: {path}");
+        ifcPath = path;
+        StartSessionLog();
+        MapData();
+        Post(new { type = "file", path = ifcPath });
+        if (NetworkIsCurrent()) Post(new { type = "done", @base = DataBase() });
+        else _ = RunReaderAsync("", "", null, geometryOnly: true);
+    }
+
     private async Task OnMessageAsync(string json)
     {
         using var document = JsonDocument.Parse(json);
@@ -97,13 +124,7 @@ internal sealed class MainWindow : Form
                 {
                     if (File.Exists(ifcPath)) dialog.FileName = ifcPath;
                     if (dialog.ShowDialog(this) != DialogResult.OK) break;
-                    WriteSessionLog($"Modelo IFC selecionado: {dialog.FileName}");
-                    ifcPath = dialog.FileName;
-                    StartSessionLog();
-                    MapData();
-                    Post(new { type = "file", path = ifcPath });
-                    if (NetworkIsCurrent()) Post(new { type = "done", @base = DataBase() });
-                    else _ = RunReaderAsync("", "", null, geometryOnly: true);
+                    OpenIfc(dialog.FileName);
                 }
                 break;
             case "analyze":

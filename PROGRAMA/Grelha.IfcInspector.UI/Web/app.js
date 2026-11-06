@@ -719,6 +719,20 @@ host?.addEventListener("message", (e) => {
   else if (m.type === "pumpChosen") { state.selectedPumpId = m.id; pumpsTable(); updateButtons(); }
 });
 function setFile(path) { state.path = path || ""; $("arquivo").textContent = path ? path.split(/[\\/]/).pop() : "nenhum IFC selecionado"; $("btnAnalisar").disabled = !path; }
+// Arrastar um IFC para qualquer ponto da janela abre o modelo (o arquivo segue junto da mensagem para a janela, que lê o caminho).
+let dragDepth = 0;
+const isIfc = (name) => /\.ifc(zip)?$/i.test(name);
+document.addEventListener("dragenter", (e) => { if (![...e.dataTransfer.types].includes("Files")) return; e.preventDefault(); dragDepth++; document.body.classList.add("soltar"); });
+document.addEventListener("dragover", (e) => { if ([...e.dataTransfer.types].includes("Files")) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } });
+document.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; document.body.classList.remove("soltar"); } });
+document.addEventListener("drop", (e) => {
+  if (!e.dataTransfer.files.length) return;
+  e.preventDefault(); dragDepth = 0; document.body.classList.remove("soltar");
+  const file = [...e.dataTransfer.files].find((f) => isIfc(f.name));
+  if (!file) { $("status").textContent = "Arraste um arquivo .ifc para abrir o modelo."; return; }
+  if (host?.postMessageWithAdditionalObjects) host.postMessageWithAdditionalObjects({ cmd: "dropIfc" }, [file]);
+  else $("status").textContent = `Arquivo recebido: ${file.name} (abra pelo programa instalado para analisar).`;
+});
 updateButtons();
 updateAreaActions();
 send({ cmd: "ready" });
