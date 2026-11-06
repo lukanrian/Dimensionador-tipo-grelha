@@ -23,3 +23,7 @@ graphify-out/
 *.docx
 
 .claude/
+
+# Resultados gerados pelo programa (ao lado de cada IFC) e saídas avulsas de outros trabalhos
+Resultados/
+/output/

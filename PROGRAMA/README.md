@@ -1,4 +1,4 @@
-# Dimensionador Tipo Grelha 0.44
+# Dimensionador Tipo Grelha 0.45
 
 ## Organização das pastas
 
@@ -8,19 +8,21 @@ DIMENSIONADOR TIPO GRELHA/
 │  ├─ Grelha.sln                solução com os três projetos
 │  ├─ Grelha.IfcInspector/      leitor do IFC, cálculo hidráulico, seleção de bombas e memorial
 │  ├─ Grelha.IfcInspector.UI/   janela do programa
-│  ├─ Shared/                   código comum (gráfico da bomba)
+│  ├─ Shared/                   código comum (gráfico da bomba e caminhos de saída)
 │  ├─ Catalogo/                 bombas_incendio.json/.csv (lidos pelo programa)
 │  ├─ Ferramentas/              extract_catalog.py (extração do catálogo PDF)
 │  ├─ Executar_Grelha.bat       compila e abre a janela
 │  ├─ Instalar_Grelha.bat/.ps1  publica e instala no computador
 │  └─ dist/                     pacotes publicados por versão
-├─ IFC/                         modelos IFC, memorial PDF e saídas da análise
+├─ IFC/                         modelos IFC e memoriais de entrada
+│  └─ Resultados/               logs, relatórios, rede 3D e memoriais gerados
 ├─ CATALOGO/                    catálogo do fabricante (PDF)
 ├─ NORMAS/                      NBR 10897 e NBR 16704
 ├─ PROJETO MODELO/              pranchas do projeto de referência
-├─ logs/                        registros de execução
 └─ RELATORIOS/                  relatórios de atualização por versão (internos)
 ```
+
+Todos os arquivos gerados ficam em `Resultados` ao lado do IFC selecionado. O modelo IFC e os memoriais de entrada permanecem na pasta original.
 
 Aplicativo para abrir um IFC4 e exportar o inventário da rede de sprinklers, uma auditoria geométrica e ligações candidatas.
 
@@ -154,6 +156,16 @@ O 3D usa a biblioteca camera-controls 2.9.0 (MIT, em `Web/lib`) com a mesma conf
   fora da área não contam). As propriedades de cada elemento dizem como ele foi ligado e a distância. Confira antes de aceitar o resultado.
 - **Solucionador esparso:** o sistema de cada iteração é resolvido por gradiente conjugado com matriz esparsa; acabou o limite de
   4.000 nós da matriz densa. No IFC modelo o resultado é o mesmo da versão anterior (17,27 L/s; 53,06 m).
+
+## Revisão de robustez (0.45)
+
+- Todos os resultados ficam em `Resultados` ao lado do IFC (logs, CSVs, rede 3D, IFC da rede, memoriais).
+- A rede 3D guarda o tamanho e a data do IFC; a janela só a reaproveita se o IFC for o mesmo. Uma análise nova apaga antes
+  a seleção de bombas e a curva do sistema anteriores, para não mostrar resultado velho se ela falhar.
+- Tubos sem geometria reconhecida (só a extrusão é lida) são listados no log; o cálculo é interrompido em vez de usar uma rede incompleta.
+- O 3D mostra primeiro a rede simplificada e depois troca pela geometria original do IFC (com cache local).
+- O alinhamento entre o memorial e o IFC usa uma grade espacial dos sprinklers, em vez de comparar com todos.
+- As planilhas de revisão manual são gravadas num arquivo temporário e só trocam a anterior no fim.
 
 ## Critérios sem memorial (0.44; publicada antes como 0.37)
 

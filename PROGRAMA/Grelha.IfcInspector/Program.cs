@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
@@ -9,6 +9,7 @@ using Xbim.Common.Geometry;
 using Xbim.Ifc;
 using Xbim.Ifc.Extensions;
 using Xbim.Ifc4.Interfaces;
+using Grelha.Shared;
 
 static string? TypeName(IIfcObject item) => item.IsTypedBy.FirstOrDefault()?.RelatingType.Name.ToString();
 static string Id(IIfcRoot item) => item.GlobalId.Value.ToString() ?? throw new InvalidDataException("Elemento IFC sem GlobalId.");
@@ -247,7 +248,7 @@ static (Dictionary<string, int> Ids, Dictionary<int, int> Sizes) FindComponents(
     return (ids, sizes);
 }
 
-var logDirectory = Environment.GetEnvironmentVariable("GRELHA_LOG_DIR") ?? Path.Combine(Environment.CurrentDirectory, "logs");
+var logDirectory = Environment.GetEnvironmentVariable("GRELHA_LOG_DIR") ?? Path.Combine(Environment.CurrentDirectory, "Resultados");
 Directory.CreateDirectory(logDirectory);
 var logPath = Environment.GetEnvironmentVariable("GRELHA_LOG_PATH") ?? Path.Combine(logDirectory, $"Grelha_{DateTime.Now:yyyyMMdd_HHmmss_fff}.log");
 async Task LogAsync(string message) => await File.AppendAllTextAsync(logPath, $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} {message}{Environment.NewLine}");
@@ -309,6 +310,11 @@ try
     }
 
     var input = Path.GetFullPath(args[0]);
+    // Uma análise nova não pode deixar à mostra a seleção de bombas ou a curva do sistema da execução anterior:
+    // se esta falhar ou não avaliar bombas, a interface não acha nada em vez de achar o resultado velho.
+    if (!geometryOnly)
+        foreach (var stale in new[] { ".pump-selection.csv", ".system-curve.csv" })
+            File.Delete(OutputPaths.PathFor(input, stale));
     await LogAsync($"Abrindo IFC: {input}");
     using var model = IfcStore.Open(input, ifcDatabaseSizeThreshHold: 64);
 
@@ -324,7 +330,7 @@ try
     // ou o próprio leitor mudam (uma versão nova do programa pode extrair a rede de outro jeito).
     async Task WriteNetworkIfcAsync()
     {
-        var networkIfc = Path.ChangeExtension(input, ".network.ifc");
+        var networkIfc = OutputPaths.FileFor(input, ".network.ifc");
         var reader = Path.Combine(AppContext.BaseDirectory, "Grelha.IfcInspector.dll");
         var stale = !File.Exists(networkIfc) || File.GetLastWriteTimeUtc(networkIfc) < File.GetLastWriteTimeUtc(input)
             || (File.Exists(reader) && File.GetLastWriteTimeUtc(networkIfc) < File.GetLastWriteTimeUtc(reader));
@@ -373,6 +379,21 @@ try
     if (!areaMode && operationArea.Length > 0)
     {
         var (seedA, seedB) = (operationArea[0], operationArea[1]);
+        // Grade dos sprinklers do IFC (células de 0,5 m): cada ponto do memorial, levado ao sistema do IFC, só é comparado
+        // com os sprinklers das 9 células vizinhas, em vez de com todos. Erro acima de 0,5 m conta como 0,5 m (já é "não casou").
+        var cell = 0.5 * unitsPerMeter;
+        var grid = sprinklerAnchors.GroupBy(anchor => (X: (long)Math.Floor(anchor.Point.X / cell), Y: (long)Math.Floor(anchor.Point.Y / cell)))
+            .ToDictionary(group => group.Key, group => group.Select(anchor => anchor.Point).ToArray());
+        double Nearest(double x, double y)
+        {
+            var (cx, cy) = ((long)Math.Floor(x / cell), (long)Math.Floor(y / cell));
+            var best = cell;
+            for (var dx = -1; dx <= 1; dx++)
+                for (var dy = -1; dy <= 1; dy++)
+                    if (grid.TryGetValue((cx + dx, cy + dy), out var points))
+                        foreach (var p in points) best = Math.Min(best, Math.Sqrt(Math.Pow(p.X - x, 2) + Math.Pow(p.Y - y, 2)));
+            return best;
+        }
         var targetDistance = Math.Sqrt(Math.Pow(seedA.X - seedB.X, 2) + Math.Pow(seedA.Y - seedB.Y, 2));
         for (var i = 0; i < sprinklerAnchors.Count; i++)
         for (var j = i + 1; j < sprinklerAnchors.Count; j++)
@@ -389,12 +410,12 @@ try
                 var sine = ((seedB.Y - seedA.Y) * sx - (seedB.X - seedA.X) * sy) / (targetDistance * targetDistance);
                 var offsetX = seedA.X - (cosine * from.X - sine * from.Y);
                 var offsetY = seedA.Y - (sine * from.X + cosine * from.Y);
-                var errors = operationArea.Select(point => sprinklerAnchors.Min(anchor =>
+                // Inversa da rotação (cosseno, seno) + translação: ponto do memorial → sistema do IFC (a rotação preserva distâncias).
+                var errors = operationArea.Select(point =>
                 {
-                    var x = cosine * anchor.Point.X - sine * anchor.Point.Y + offsetX;
-                    var y = sine * anchor.Point.X + cosine * anchor.Point.Y + offsetY;
-                    return Math.Sqrt(Math.Pow(x - point.X, 2) + Math.Pow(y - point.Y, 2));
-                })).ToArray();
+                    var (ux, uy) = (point.X - offsetX, point.Y - offsetY);
+                    return Nearest(cosine * ux + sine * uy, -sine * ux + cosine * uy);
+                }).ToArray();
                 var count = errors.Count(error => error <= 0.1 * unitsPerMeter);
                 var rms = Math.Sqrt(errors.Average(error => error * error));
                 if (count > bestAlignment.Matches || count == bestAlignment.Matches && rms < bestAlignment.Rms)
@@ -457,6 +478,18 @@ try
         pipeEnds.Add((pipe, 1, end));
     }
 
+    // Só a extrusão (IfcExtrudedAreaSolid) é lida. Tubo sem ela ficaria fora da rede sem aviso: na prévia avisa,
+    // no cálculo interrompe, porque uma rede incompleta daria um resultado hidráulico errado.
+    var pipesWithoutGeometry = pipes.Except(pipeEnds.Select(end => end.Pipe)).ToList();
+    if (pipesWithoutGeometry.Count > 0)
+    {
+        var message = $"{pipesWithoutGeometry.Count} de {pipes.Count} tubo(s) da rede Sprinklers sem geometria reconhecida (só a extrusão IfcExtrudedAreaSolid é lida): "
+            + string.Join(", ", pipesWithoutGeometry.Take(10).Select(Id)) + (pipesWithoutGeometry.Count > 10 ? ", …" : "") + ".";
+        await LogAsync(message);
+        Console.Error.WriteLine(message);
+        if (!geometryOnly) throw new InvalidDataException(message + " O cálculo foi interrompido para não usar uma rede incompleta.");
+    }
+
     if (geometryOnly)
     {
         if (pipeEnds.Count < 2) throw new InvalidDataException("Não foi possível extrair a geometria dos tubos da rede Sprinklers.");
@@ -469,6 +502,8 @@ try
         {
             Version = version,
             Ifc = Path.GetFileName(input),
+            IfcLength = new FileInfo(input).Length,
+            IfcModifiedUtc = File.GetLastWriteTimeUtc(input),
             Origin = new { X = minX * unitScale, Y = minY * unitScale, Z = minZ * unitScale },
             Summary = new { OperationArea = "", Density_mm_min = (double?)null, DesignArea_m2 = (double?)null, SprinklerCount = 0, Warnings = Array.Empty<string>() },
             Pipes = pipeEnds.Where((_, index) => index % 2 == 0).Select((start, index) =>
@@ -482,13 +517,13 @@ try
                 .Concat(terminals.Where(item => !sprinklers.Contains(item) && item.ObjectPlacement is not null).Select(item => new { Id = Id(item), Kind = "Device", Type = TypeName(item), Indication = "", P = Xyz(Origin(item)), Active = false, Join = (string?)null, JoinDist_m = (double?)null })),
             DeadEnds = Array.Empty<object>()
         };
-        await File.WriteAllTextAsync(Path.ChangeExtension(input, ".network-3d.json"), JsonSerializer.Serialize(network));
+        await File.WriteAllTextAsync(OutputPaths.FileFor(input, ".network-3d.json"), JsonSerializer.Serialize(network));
         await WriteNetworkIfcAsync();
         await LogAsync($"Visualização rápida pronta: {pipes.Count} tubos, {fittings.Count} conexões e {sprinklerAnchors.Count} sprinklers.");
         return 0;
     }
 
-    string? operationAreaPath = memorial is null || geometryOnly ? null : Path.ChangeExtension(input, ".operation-area-candidates.csv");
+    string? operationAreaPath = memorial is null || geometryOnly ? null : OutputPaths.FileFor(input, ".operation-area-candidates.csv");
     var operationAreaPipeNumbers = new Dictionary<string, HashSet<int>>(StringComparer.Ordinal);
     if (operationAreaPath is not null)
     await using (var writer = new StreamWriter(operationAreaPath, false, System.Text.Encoding.UTF8))
@@ -524,7 +559,7 @@ try
         }
     }
 
-    string? branchReviewPath = operationAreaPath is null ? null : Path.ChangeExtension(input, ".operation-area-branch-review.csv");
+    string? branchReviewPath = operationAreaPath is null ? null : OutputPaths.FileFor(input, ".operation-area-branch-review.csv");
     var branchReviewRows = 0;
     var branchReviewDecisionCounts = new Dictionary<string, int>(StringComparer.Ordinal) { ["Pendente"] = 0, ["Confirmada"] = 0, ["Rejeitada"] = 0 };
     var branchReviewHistoryRows = 0;
@@ -542,7 +577,7 @@ try
             TrimWhiteSpace = false
         };
         parser.SetDelimiters(",");
-        await using var review = new StreamWriter(branchReviewPath, false, System.Text.Encoding.UTF8);
+        await using var review = new StreamWriter(branchReviewPath + ".tmp", false, System.Text.Encoding.UTF8);
         var header = parser.ReadFields() ?? throw new InvalidDataException("Cabeçalho de candidatos sprinkler-ramal ausente.");
         var indices = header.Select((name, index) => (name, index)).ToDictionary(value => value.name, value => value.index, StringComparer.OrdinalIgnoreCase);
         string Field(string[] values, string name) => indices.TryGetValue(name, out var index) && index < values.Length ? values[index] : "";
@@ -571,6 +606,8 @@ try
             branchReviewHistoryRows++;
         }
     }
+    // Só troca o arquivo de revisão (com as decisões manuais) depois que o novo foi gravado inteiro.
+    if (branchReviewPath is not null) File.Move(branchReviewPath + ".tmp", branchReviewPath, overwrite: true);
 
     var fittingAnchors = fittings.Where(item => item.ObjectPlacement is not null)
         .Select(item => (Item: item, Point: Origin(item))).ToList();
@@ -586,8 +623,8 @@ try
     var directPipeTouches = 0;
     var fittingCandidates = 0;
     var sprinklerCandidates = 0;
-    var auditPath = Path.ChangeExtension(input, ".connectivity-audit.csv");
-    var networkCandidatesPath = Path.ChangeExtension(input, ".network-candidates.csv");
+    var auditPath = OutputPaths.FileFor(input, ".connectivity-audit.csv");
+    var networkCandidatesPath = OutputPaths.FileFor(input, ".network-candidates.csv");
     var candidatePipeContacts = 0;
     var candidatePipeProximities = 0;
     var candidateFittingLinks = 0;
@@ -659,9 +696,9 @@ try
         }
     }
 
-    string? topologyReviewPath = operationAreaPath is null ? null : Path.ChangeExtension(input, ".operation-area-topology-review.csv");
-    string? confirmedTopologyPath = operationAreaPath is null ? null : Path.ChangeExtension(input, ".operation-area-confirmed-topology.csv");
-    string? topologyAuditPath = operationAreaPath is null ? null : Path.ChangeExtension(input, ".operation-area-topology-audit.csv");
+    string? topologyReviewPath = operationAreaPath is null ? null : OutputPaths.FileFor(input, ".operation-area-topology-review.csv");
+    string? confirmedTopologyPath = operationAreaPath is null ? null : OutputPaths.FileFor(input, ".operation-area-confirmed-topology.csv");
+    string? topologyAuditPath = operationAreaPath is null ? null : OutputPaths.FileFor(input, ".operation-area-topology-audit.csv");
     var operationAreaReviewRows = 0;
     var reviewDecisionCounts = new Dictionary<string, int>(StringComparer.Ordinal) { ["Pendente"] = 0, ["Confirmada"] = 0, ["Rejeitada"] = 0 };
     var operationAreaReviewHistoryRows = 0;
@@ -680,7 +717,7 @@ try
             TrimWhiteSpace = false
         };
         parser.SetDelimiters(",");
-        await using var review = new StreamWriter(topologyReviewPath, false, System.Text.Encoding.UTF8);
+        await using var review = new StreamWriter(topologyReviewPath + ".tmp", false, System.Text.Encoding.UTF8);
         var header = parser.ReadFields() ?? throw new InvalidDataException("Cabeçalho de candidatos de conectividade ausente.");
         var candidateIndices = header.Select((name, index) => (name, index)).ToDictionary(value => value.name, value => value.index, StringComparer.OrdinalIgnoreCase);
         string CandidateField(string[] values, string name) => candidateIndices.TryGetValue(name, out var index) && index < values.Length ? values[index] : "";
@@ -809,6 +846,8 @@ try
         }
         topologyAuditComponents = topologyComponentSizes.Count;
     }
+    // Só troca o arquivo de revisão (com as decisões manuais) depois que o novo foi gravado inteiro.
+    if (topologyReviewPath is not null) File.Move(topologyReviewPath + ".tmp", topologyReviewPath, overwrite: true);
 
     foreach (var linkedPipes in fittingPipeLinks.Values)
     {
@@ -823,7 +862,7 @@ try
         var observed = fittingPipeEndsAt5cm.GetValueOrDefault(Id(fitting))?.Count ?? 0;
         return (Expected: expected, Observed: observed);
     }).Where(group => group.Expected is not null).ToArray();
-    var componentsPath = Path.ChangeExtension(input, ".network-components.csv");
+    var componentsPath = OutputPaths.FileFor(input, ".network-components.csv");
     await using (var writer = new StreamWriter(componentsPath, false, System.Text.Encoding.UTF8))
     {
         await writer.WriteLineAsync("PipeGlobalId,PipeType,DirectComponent,DirectComponentPipeCount,CandidateComponent,CandidateComponentPipeCount,Interpretation");
@@ -930,7 +969,7 @@ try
                 .Concat(pumps.Select(item => new HydraulicDevice(Id(item), HydraulicDeviceKind.Pump, TypeName(item) ?? "Pump", Indication(item), Origin(item))))
                 .ToArray();
             await LogAsync($"Dispositivos para o cálculo: {fittingAnchors.Count} conexões; {valves.Count} válvulas ({string.Join("; ", valves.GroupBy(item => TypeName(item)).Select(group => $"{group.Key} x{group.Count()}"))}); {pumps.Count} bombas ({string.Join("; ", pumps.Select(item => $"{TypeName(item)} [{Network(item)}]"))}); {memorial.EquivalentLengths.Length} itens de comprimento equivalente no memorial.");
-            pumpCurvePath = Path.ChangeExtension(input, ".pump-curve.csv");
+            pumpCurvePath = OutputPaths.FileFor(input, ".pump-curve.csv");
             if (!File.Exists(pumpCurvePath))
                 await File.WriteAllTextAsync(pumpCurvePath, "Flow_l_s,Head_m" + Environment.NewLine, System.Text.Encoding.UTF8);
             var curve = File.ReadAllLines(pumpCurvePath).Skip(1).Select(line => line.Split(',', ';'))
@@ -987,7 +1026,7 @@ try
                 var ranked = evaluation.Areas.Where(a => a.Error is null).OrderByDescending(a => a.RequiredHead_m).ToArray();
                 if (ranked.Length == 0) throw new InvalidDataException("Nenhuma área candidata pôde ser calculada.");
                 var worst = candidates[ranked[0].Index];
-                areaCandidatesPath = Path.ChangeExtension(input, ".area-candidates.json");
+                areaCandidatesPath = OutputPaths.FileFor(input, ".area-candidates.json");
                 await File.WriteAllTextAsync(areaCandidatesPath, JsonSerializer.Serialize(new
                 {
                     Criteria = new { Density_mm_min = density, DesignArea_m2 = designArea, K = kAuto, MinimumPressure_mca = minimumAuto, AreaPerHead_m2 = perHead },
@@ -1002,7 +1041,7 @@ try
                     minimumAuto, double.NaN, double.NaN, double.NaN, double.NaN, autoHeads, memorial.EquivalentLengths, risk);
                 hydraulicHeads = chosen.Select((anchor, index) => new HydraulicSprinkler(Id(anchor.Item), index + 1, kAuto, anchor.Point)).ToArray();
                 // A área escolhida passa a ser a área do projeto (mesmo arquivo da escolha manual no 2D).
-                await File.WriteAllTextAsync(Path.ChangeExtension(input, ".operation-area.json"), JsonSerializer.Serialize(new
+                await File.WriteAllTextAsync(OutputPaths.FileFor(input, ".operation-area.json"), JsonSerializer.Serialize(new
                 {
                     Name = memorial.OperationArea, SprinklerIds = worst.HeadIds, Density_mm_min = density, DesignArea_m2 = designArea, K = kAuto, MinimumPressure_mca = minimumAuto, RiskClass = risk
                 }));
@@ -1026,13 +1065,13 @@ try
             selection = PumpSelection.Rank(hydraulic.Candidates.Select(result => PumpSelection.Evaluate(byId[result.Id], result, target)));
             if (selection.Length > 0)
             {
-                pumpSelectionPath = Path.ChangeExtension(input, ".pump-selection.csv");
+                pumpSelectionPath = OutputPaths.FileFor(input, ".pump-selection.csv");
                 await PumpSelection.WriteCsvAsync(pumpSelectionPath, selection);
             }
             if (hydraulic.Pump is { } required && hydraulic.SystemCurve.Length > 0)
             {
                 // Curva do sistema e ponto mínimo da rede (vazão e altura com a pressão mínima exata no chuveiro mais desfavorável), em m³/h.
-                await File.WriteAllLinesAsync(Path.ChangeExtension(input, ".system-curve.csv"),
+                await File.WriteAllLinesAsync(OutputPaths.FileFor(input, ".system-curve.csv"),
                     new[] { "Kind,Flow_m3_h,Head_m", $"Required,{Number(Math.Round(required.Flow_l_s * 3.6, 3))},{Number(Math.Round(required.Head_m, 3))}" }
                         .Concat(hydraulic.SystemCurve.Select(point => $"Curve,{Number(Math.Round(point.Flow_l_s * 3.6, 3))},{Number(Math.Round(point.Head_m, 3))}")));
             }
@@ -1051,6 +1090,8 @@ try
                 {
                     Version = version,
                     Ifc = Path.GetFileName(input),
+                    IfcLength = new FileInfo(input).Length,
+                    IfcModifiedUtc = File.GetLastWriteTimeUtc(input),
                     Origin = new { X = minX / unitsPerMeter, Y = minY / unitsPerMeter, Z = minZ / unitsPerMeter },
                     Summary = new
                     {
@@ -1096,7 +1137,7 @@ try
                         .Where(item => !sprinklerAnchors.Any(anchor => (anchor.Point - item.Point).Length <= 0.06 * unitsPerMeter))
                         .Select(item => new { item.Id, P = Xyz(item.Point) })
                 };
-                await File.WriteAllTextAsync(Path.ChangeExtension(input, ".network-3d.json"), JsonSerializer.Serialize(network, new JsonSerializerOptions { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
+                await File.WriteAllTextAsync(OutputPaths.FileFor(input, ".network-3d.json"), JsonSerializer.Serialize(network, new JsonSerializerOptions { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
                 await WriteNetworkIfcAsync();
 
             }
@@ -1110,14 +1151,15 @@ try
                 var riskText = memorial.RiskClass.Length > 0 ? memorial.RiskClass : "não informada no memorial de referência";
                 // NBR 10897, Tabela 27: leve 30 min; ordinário 60 min; extraordinário 90 min.
                 var duration = riskText.Contains("leve", StringComparison.OrdinalIgnoreCase) ? 30 : riskText.Contains("extra", StringComparison.OrdinalIgnoreCase) ? 90 : 60;
-                memorialDocumentPath = Path.Combine(Path.GetDirectoryName(input)!, $"Memorial_Calculo_{Path.GetFileNameWithoutExtension(input)}_{DateTime.Now:yyyyMMdd_HHmm}.docx");
+                memorialDocumentPath = Path.Combine(OutputPaths.DirectoryFor(input), $"Memorial_Calculo_{Path.GetFileNameWithoutExtension(input)}_{DateTime.Now:yyyyMMdd_HHmm}.docx");
+                Directory.CreateDirectory(Path.GetDirectoryName(memorialDocumentPath)!);
                 MemorialWriter.Write(memorialDocumentPath, new MemorialContext(version, input, memorial, target, densityPressure_mca.Value, riskText, duration,
                     hydraulic, operating, evaluation, PumpSelection.Jockey(catalog, chosen),
                     memorial.Sprinklers.Select(head => (head.Number, head.X_cm, head.Y_cm)).ToArray(), Path.GetFileName(catalogPath!)));
                 if (!evaluation.Meets) await LogAsync($"Memorial gerado com bomba que não atende: {evaluation.Reasons}");
             }
 
-            hydraulicSprinklersPath = Path.ChangeExtension(input, ".hydraulic-sprinklers.csv");
+            hydraulicSprinklersPath = OutputPaths.FileFor(input, ".hydraulic-sprinklers.csv");
             await using (var writer = new StreamWriter(hydraulicSprinklersPath, false, System.Text.Encoding.UTF8))
             {
                 await writer.WriteLineAsync("SprinklerNumber,SprinklerGlobalId,Elevation_m,Pressure_mca,Flow_l_s,MemorialPressure_mca,MemorialFlow_l_s,PressureDifference_mca,FlowDifference_l_s");
@@ -1129,12 +1171,12 @@ try
                         Number(Math.Round(head.Pressure_mca - reference.Pressure_mca, 2)), Number(Math.Round(head.Flow_l_s - reference.Flow_l_s, 3))));
                 }
             }
-            await File.WriteAllLinesAsync(Path.ChangeExtension(input, ".hydraulic-segments.csv"),
+            await File.WriteAllLinesAsync(OutputPaths.FileFor(input, ".hydraulic-segments.csv"),
                 new[] { "Segment,FromNode,ToNode,Flow_l_s,Diameters_mm,Length_m,EquivalentLength_m,HeadLoss_m,Velocity_m_s,FromElevation_m,ToElevation_m,FromPressure_mca,ToPressure_mca" }
                     .Concat(hydraulic.Segments.Select(s => string.Join(",", s.Number, s.FromNode, s.ToNode, Number(Math.Round(s.Flow_l_s, 3)), Csv(s.Diameters_mm),
                         Number(Math.Round(s.Length_m, 2)), Number(Math.Round(s.EquivalentLength_m, 2)), Number(Math.Round(s.HeadLoss_m, 3)), Number(Math.Round(s.Velocity_m_s, 2)),
                         Number(Math.Round(s.FromElevation_m, 2)), Number(Math.Round(s.ToElevation_m, 2)), Number(Math.Round(s.FromPressure_mca, 2)), Number(Math.Round(s.ToPressure_mca, 2))))));
-            hydraulicPipesPath = Path.ChangeExtension(input, ".hydraulic-pipes.csv");
+            hydraulicPipesPath = OutputPaths.FileFor(input, ".hydraulic-pipes.csv");
             await using (var writer = new StreamWriter(hydraulicPipesPath, false, System.Text.Encoding.UTF8))
             {
                 await writer.WriteLineAsync("PipeGlobalId,PipeType,InnerDiameter_mm,Length_m,EquivalentLength_m,HazenWilliamsC,Flow_l_s,Velocity_m_s,HeadLoss_mca,FromNode,ToNode");
@@ -1290,7 +1332,7 @@ try
         FireSuppressionTerminals = terminals.Select(Describe).ToArray()
     };
 
-    var report = Path.ChangeExtension(input, ".inventory.json");
+    var report = OutputPaths.FileFor(input, ".inventory.json");
     await File.WriteAllTextAsync(report, JsonSerializer.Serialize(output, new JsonSerializerOptions { WriteIndented = true, NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
     Console.WriteLine($"Inventário salvo: {report}");
     Console.WriteLine($"Rede Sprinklers: {pipes.Count} tubos; {fittings.Count} conexões; {sprinklers.Count} sprinklers");

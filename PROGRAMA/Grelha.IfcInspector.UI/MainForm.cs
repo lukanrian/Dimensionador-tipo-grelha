@@ -1,5 +1,6 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Text;
+using Grelha.Shared;
 
 namespace Grelha.IfcInspector.UI;
 
@@ -38,12 +39,14 @@ internal sealed class MainForm : Form
         bundledReader = File.Exists(installedReader) ? installedReader : null;
         projectRoot = Environment.GetEnvironmentVariable("GRELHA_PROJECT_ROOT") ?? (bundledReader is null ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..")) : AppContext.BaseDirectory);
         cliProject = Environment.GetEnvironmentVariable("GRELHA_CLI_PROJECT") ?? Path.Combine(projectRoot, "Grelha.IfcInspector", "Grelha.IfcInspector.csproj");
-        var logDirectory = Environment.GetEnvironmentVariable("GRELHA_LOG_DIR") ?? (bundledReader is null ? Path.GetFullPath(Path.Combine(projectRoot, "..", "logs")) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Dimensionador Tipo Grelha", "logs"));
+        var defaultFile = Environment.GetEnvironmentVariable("GRELHA_DEFAULT_IFC") ?? Path.GetFullPath(Path.Combine(projectRoot, "..", "IFC", "786-INC-PRE-0000-MOD-GERL-AC-MODELO_IFC-00.ifc"));
+        filePath.Text = args.FirstOrDefault() ?? (File.Exists(defaultFile) ? defaultFile : "");
+        var logDirectory = Environment.GetEnvironmentVariable("GRELHA_LOG_DIR") ?? (File.Exists(filePath.Text) ? OutputPaths.DirectoryFor(filePath.Text) : Path.Combine(projectRoot, "Resultados"));
         Directory.CreateDirectory(logDirectory);
         lastLogPath = Path.Combine(logDirectory, $"Grelha_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Environment.ProcessId}.log");
-        File.WriteAllText(lastLogPath, $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} Programa iniciado. Versão 0.44.{Environment.NewLine}", Encoding.UTF8);
+        File.WriteAllText(lastLogPath, $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} Programa iniciado. Versão 0.45.{Environment.NewLine}", Encoding.UTF8);
 
-        Text = "Dimensionador Tipo Grelha 0.44";
+        Text = "Dimensionador Tipo Grelha 0.45";
         StartPosition = FormStartPosition.CenterScreen;
         MinimumSize = new Size(980, 430);
         ClientSize = new Size(980, 558);
@@ -58,7 +61,7 @@ internal sealed class MainForm : Form
         };
         var subtitle = new Label
         {
-            Text = "Leitura, conectividade e dimensionamento de redes de sprinklers · versão 0.44",
+            Text = "Leitura, conectividade e dimensionamento de redes de sprinklers · versão 0.45",
             AutoSize = true,
             ForeColor = SystemColors.GrayText,
             Location = new Point(26, 52)
@@ -88,7 +91,8 @@ internal sealed class MainForm : Form
         pumpCurveButton.SetBounds(662, 165, 130, 30);
         pumpCurveButton.Click += (_, _) =>
         {
-            var curve = Path.ChangeExtension(filePath.Text, ".pump-curve.csv");
+            if (!File.Exists(filePath.Text)) return;
+            var curve = OutputPaths.FileFor(filePath.Text, ".pump-curve.csv");
             if (!File.Exists(curve) && File.Exists(filePath.Text)) File.WriteAllText(curve, "Flow_l_s,Head_m" + Environment.NewLine, Encoding.UTF8);
             OpenOutput(curve);
         };
@@ -115,61 +119,61 @@ internal sealed class MainForm : Form
         inventoryButton.SetBounds(24, 462, 130, 30);
         inventoryButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         inventoryButton.Enabled = false;
-        inventoryButton.Click += (_, _) => OpenOutput(Path.ChangeExtension(filePath.Text, ".inventory.json"));
+        inventoryButton.Click += (_, _) => OpenOutput(OutputPaths.FileFor(filePath.Text, ".inventory.json"));
 
         auditButton.Text = "Abrir auditoria";
         auditButton.SetBounds(160, 462, 130, 30);
         auditButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         auditButton.Enabled = false;
-        auditButton.Click += (_, _) => OpenOutput(Path.ChangeExtension(filePath.Text, ".connectivity-audit.csv"));
+        auditButton.Click += (_, _) => OpenOutput(OutputPaths.FileFor(filePath.Text, ".connectivity-audit.csv"));
 
         candidatesButton.Text = "Ligações candidatas";
         candidatesButton.SetBounds(392, 462, 138, 30);
         candidatesButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         candidatesButton.Enabled = false;
-        candidatesButton.Click += (_, _) => OpenOutput(Path.ChangeExtension(filePath.Text, ".network-candidates.csv"));
+        candidatesButton.Click += (_, _) => OpenOutput(OutputPaths.FileFor(filePath.Text, ".network-candidates.csv"));
 
         componentsButton.Text = "Grupos de tubos";
         operationAreaButton.Text = "Revisar conexões";
         operationAreaButton.SetBounds(538, 462, 130, 30);
         operationAreaButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         operationAreaButton.Enabled = false;
-        operationAreaButton.Click += (_, _) => OpenOutput(Path.ChangeExtension(filePath.Text, ".operation-area-topology-review.csv"));
+        operationAreaButton.Click += (_, _) => OpenOutput(OutputPaths.FileFor(filePath.Text, ".operation-area-topology-review.csv"));
 
         componentsButton.SetBounds(810, 462, 146, 30);
         componentsButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         componentsButton.Enabled = false;
-        componentsButton.Click += (_, _) => OpenOutput(Path.ChangeExtension(filePath.Text, ".network-components.csv"));
+        componentsButton.Click += (_, _) => OpenOutput(OutputPaths.FileFor(filePath.Text, ".network-components.csv"));
 
         confirmedTopologyButton.Text = "Topologia confirmada";
         confirmedTopologyButton.SetBounds(674, 462, 130, 30);
         confirmedTopologyButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         confirmedTopologyButton.Enabled = false;
-        confirmedTopologyButton.Click += (_, _) => OpenOutput(Path.ChangeExtension(filePath.Text, ".operation-area-confirmed-topology.csv"));
+        confirmedTopologyButton.Click += (_, _) => OpenOutput(OutputPaths.FileFor(filePath.Text, ".operation-area-confirmed-topology.csv"));
 
         topologyAuditButton.Text = "Auditoria da topologia revisada";
         topologyAuditButton.SetBounds(24, 500, 220, 30);
         topologyAuditButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         topologyAuditButton.Enabled = false;
-        topologyAuditButton.Click += (_, _) => OpenOutput(Path.ChangeExtension(filePath.Text, ".operation-area-topology-audit.csv"));
+        topologyAuditButton.Click += (_, _) => OpenOutput(OutputPaths.FileFor(filePath.Text, ".operation-area-topology-audit.csv"));
 
         branchReviewButton.Text = "Revisar bicos e ramais";
         branchReviewButton.SetBounds(254, 500, 180, 30);
         branchReviewButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         branchReviewButton.Enabled = false;
-        branchReviewButton.Click += (_, _) => OpenOutput(Path.ChangeExtension(filePath.Text, ".operation-area-branch-review.csv"));
+        branchReviewButton.Click += (_, _) => OpenOutput(OutputPaths.FileFor(filePath.Text, ".operation-area-branch-review.csv"));
 
         hydraulicHeadsButton.Text = "Dimensionamento: bicos";
         hydraulicHeadsButton.SetBounds(444, 500, 170, 30);
         hydraulicHeadsButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         hydraulicHeadsButton.Enabled = false;
-        hydraulicHeadsButton.Click += (_, _) => OpenOutput(Path.ChangeExtension(filePath.Text, ".hydraulic-sprinklers.csv"));
+        hydraulicHeadsButton.Click += (_, _) => OpenOutput(OutputPaths.FileFor(filePath.Text, ".hydraulic-sprinklers.csv"));
 
         hydraulicPipesButton.Text = "Dimensionamento: tubos";
         hydraulicPipesButton.SetBounds(624, 500, 170, 30);
         hydraulicPipesButton.Anchor = AnchorStyles.Bottom | AnchorStyles.Left;
         hydraulicPipesButton.Enabled = false;
-        hydraulicPipesButton.Click += (_, _) => OpenOutput(Path.ChangeExtension(filePath.Text, ".hydraulic-pipes.csv"));
+        hydraulicPipesButton.Click += (_, _) => OpenOutput(OutputPaths.FileFor(filePath.Text, ".hydraulic-pipes.csv"));
 
         pumpSelectionButton.Text = "Selecionar bomba";
         pumpSelectionButton.SetBounds(804, 500, 152, 30);
@@ -177,7 +181,7 @@ internal sealed class MainForm : Form
         pumpSelectionButton.Enabled = false;
         pumpSelectionButton.Click += async (_, _) =>
         {
-            var csv = Path.ChangeExtension(filePath.Text, ".pump-selection.csv");
+            var csv = OutputPaths.FileFor(filePath.Text, ".pump-selection.csv");
             if (!File.Exists(csv)) return;
             var catalogJson = new[] { Path.Combine(AppContext.BaseDirectory, "Leitor", "Catalogo", "bombas_incendio.json"), Path.Combine(projectRoot, "Catalogo", "bombas_incendio.json") }
                 .FirstOrDefault(File.Exists);
@@ -186,7 +190,7 @@ internal sealed class MainForm : Form
                 MessageBox.Show(this, "Catálogo de bombas (bombas_incendio.json) não encontrado.", "Catálogo ausente", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return;
             }
-            using var form = new PumpSelectionForm(csv, catalogJson, Path.ChangeExtension(filePath.Text, ".system-curve.csv"));
+            using var form = new PumpSelectionForm(csv, catalogJson, OutputPaths.FileFor(filePath.Text, ".system-curve.csv"));
             if (form.ShowDialog(this) == DialogResult.OK && form.SelectedPumpId is { } id) await AnalyzeAsync(id);
         };
 
@@ -198,8 +202,6 @@ internal sealed class MainForm : Form
 
         Controls.AddRange([title, subtitle, fileLabel, filePath, browseButton, analyzeButton, sourceLabel, sourcePipe, tankLabel, tankLevel, pumpCurveButton, progress, status, output, inventoryButton, auditButton, logButton, candidatesButton, operationAreaButton, confirmedTopologyButton, topologyAuditButton, branchReviewButton, hydraulicHeadsButton, hydraulicPipesButton, pumpSelectionButton, componentsButton]);
 
-        var defaultFile = Environment.GetEnvironmentVariable("GRELHA_DEFAULT_IFC") ?? Path.GetFullPath(Path.Combine(projectRoot, "..", "IFC", "786-INC-PRE-0000-MOD-GERL-AC-MODELO_IFC-00.ifc"));
-        filePath.Text = args.FirstOrDefault() ?? (File.Exists(defaultFile) ? defaultFile : "");
         AppendOutput($"Log: {lastLogPath}");
         FormClosing += (_, _) =>
         {
@@ -217,7 +219,11 @@ internal sealed class MainForm : Form
             CheckFileExists = true
         };
         if (File.Exists(filePath.Text)) dialog.FileName = filePath.Text;
-        if (dialog.ShowDialog(this) == DialogResult.OK) filePath.Text = dialog.FileName;
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            filePath.Text = dialog.FileName;
+            StartSessionLog(filePath.Text);
+        }
     }
 
     private async Task AnalyzeAsync(string? memorialPumpId = null)
@@ -279,7 +285,7 @@ internal sealed class MainForm : Form
             startInfo.ArgumentList.Add("--nivel-reservatorio");
             startInfo.ArgumentList.Add(level);
         }
-        startInfo.Environment["GRELHA_LOG_DIR"] = Environment.GetEnvironmentVariable("GRELHA_LOG_DIR") ?? (bundledReader is null ? Path.GetFullPath(Path.Combine(projectRoot, "..", "logs")) : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Dimensionador Tipo Grelha", "logs"));
+        startInfo.Environment["GRELHA_LOG_DIR"] = Path.GetDirectoryName(lastLogPath)!;
         startInfo.Environment["GRELHA_LOG_PATH"] = lastLogPath!;
 
         try
@@ -302,20 +308,20 @@ internal sealed class MainForm : Form
             if (exitCode == 0)
             {
                 status.Text = "Análise concluída. Use Selecionar bomba para ver as bombas do catálogo que atendem e gerar o memorial.";
-                inventoryButton.Enabled = File.Exists(Path.ChangeExtension(input, ".inventory.json"));
-                auditButton.Enabled = File.Exists(Path.ChangeExtension(input, ".connectivity-audit.csv"));
-                candidatesButton.Enabled = File.Exists(Path.ChangeExtension(input, ".network-candidates.csv"));
-                operationAreaButton.Enabled = File.Exists(Path.ChangeExtension(input, ".operation-area-topology-review.csv"));
-                confirmedTopologyButton.Enabled = File.Exists(Path.ChangeExtension(input, ".operation-area-confirmed-topology.csv"));
-                topologyAuditButton.Enabled = File.Exists(Path.ChangeExtension(input, ".operation-area-topology-audit.csv"));
-                branchReviewButton.Enabled = File.Exists(Path.ChangeExtension(input, ".operation-area-branch-review.csv"));
-                hydraulicHeadsButton.Enabled = File.Exists(Path.ChangeExtension(input, ".hydraulic-sprinklers.csv"));
-                hydraulicPipesButton.Enabled = File.Exists(Path.ChangeExtension(input, ".hydraulic-pipes.csv"));
-                componentsButton.Enabled = File.Exists(Path.ChangeExtension(input, ".network-components.csv"));
-                pumpSelectionButton.Enabled = File.Exists(Path.ChangeExtension(input, ".pump-selection.csv"));
+                inventoryButton.Enabled = File.Exists(OutputPaths.FileFor(input, ".inventory.json"));
+                auditButton.Enabled = File.Exists(OutputPaths.FileFor(input, ".connectivity-audit.csv"));
+                candidatesButton.Enabled = File.Exists(OutputPaths.FileFor(input, ".network-candidates.csv"));
+                operationAreaButton.Enabled = File.Exists(OutputPaths.FileFor(input, ".operation-area-topology-review.csv"));
+                confirmedTopologyButton.Enabled = File.Exists(OutputPaths.FileFor(input, ".operation-area-confirmed-topology.csv"));
+                topologyAuditButton.Enabled = File.Exists(OutputPaths.FileFor(input, ".operation-area-topology-audit.csv"));
+                branchReviewButton.Enabled = File.Exists(OutputPaths.FileFor(input, ".operation-area-branch-review.csv"));
+                hydraulicHeadsButton.Enabled = File.Exists(OutputPaths.FileFor(input, ".hydraulic-sprinklers.csv"));
+                hydraulicPipesButton.Enabled = File.Exists(OutputPaths.FileFor(input, ".hydraulic-pipes.csv"));
+                componentsButton.Enabled = File.Exists(OutputPaths.FileFor(input, ".network-components.csv"));
+                pumpSelectionButton.Enabled = File.Exists(OutputPaths.FileFor(input, ".pump-selection.csv"));
                 if (memorialPumpId is not null)
                 {
-                    var memorialFile = new DirectoryInfo(Path.GetDirectoryName(input)!).GetFiles("Memorial_Calculo_*.docx")
+                    var memorialFile = new DirectoryInfo(OutputPaths.DirectoryFor(input)).GetFiles("Memorial_Calculo_*.docx")
                         .Where(file => file.LastWriteTime >= startedAt.AddSeconds(-2)).OrderByDescending(file => file.LastWriteTime).FirstOrDefault();
                     status.Text = memorialFile is null ? "O memorial não foi gerado; consulte o log." : $"Memorial gerado: {memorialFile.Name}";
                     if (memorialFile is not null) OpenOutput(memorialFile.FullName);
@@ -368,6 +374,20 @@ internal sealed class MainForm : Form
 
     private void WriteSessionLog(string message) =>
         File.AppendAllText(lastLogPath!, $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} {message}{Environment.NewLine}", Encoding.UTF8);
+
+    private void StartSessionLog(string input)
+    {
+        var directory = OutputPaths.DirectoryFor(input);
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, Path.GetFileName(lastLogPath!));
+        if (!string.Equals(lastLogPath, path, StringComparison.OrdinalIgnoreCase))
+        {
+            File.Move(lastLogPath!, path);
+            lastLogPath = path;
+        }
+        WriteSessionLog($"Modelo IFC selecionado: {input}");
+        logButton.Enabled = true;
+    }
 
     private void StopChildProcess()
     {

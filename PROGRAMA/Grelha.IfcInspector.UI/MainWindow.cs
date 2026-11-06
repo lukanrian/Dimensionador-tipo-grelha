@@ -3,18 +3,19 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
+using Grelha.Shared;
 
 namespace Grelha.IfcInspector.UI;
 
 // Janela principal: interface web (painel, visualizador 3D da rede) numa WebView2; o cálculo roda no leitor (processo separado).
 internal sealed class MainWindow : Form
 {
-    private const string Version = "0.44";
+    private const string Version = "0.45";
     private readonly WebView2 web = new() { Dock = DockStyle.Fill };
     private readonly string projectRoot;
     private readonly string cliProject;
     private readonly string? bundledReader;
-    private readonly string logDirectory;
+    private string logDirectory;
     private string lastLogPath;
     private string ifcPath = "";
     private Process? activeProcess;
@@ -26,14 +27,12 @@ internal sealed class MainWindow : Form
         bundledReader = File.Exists(installedReader) ? installedReader : null;
         projectRoot = Environment.GetEnvironmentVariable("GRELHA_PROJECT_ROOT") ?? (bundledReader is null ? Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..")) : AppContext.BaseDirectory);
         cliProject = Environment.GetEnvironmentVariable("GRELHA_CLI_PROJECT") ?? Path.Combine(projectRoot, "Grelha.IfcInspector", "Grelha.IfcInspector.csproj");
-        logDirectory = Environment.GetEnvironmentVariable("GRELHA_LOG_DIR") ?? (bundledReader is null ? Path.GetFullPath(Path.Combine(projectRoot, "..", "logs"))
-            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Dimensionador Tipo Grelha", "logs"));
+        var defaultFile = Environment.GetEnvironmentVariable("GRELHA_DEFAULT_IFC") ?? Path.GetFullPath(Path.Combine(projectRoot, "..", "IFC", "786-INC-PRE-0000-MOD-GERL-AC-MODELO_IFC-00.ifc"));
+        ifcPath = args.FirstOrDefault(File.Exists) ?? (File.Exists(defaultFile) ? defaultFile : "");
+        logDirectory = Environment.GetEnvironmentVariable("GRELHA_LOG_DIR") ?? (ifcPath.Length > 0 ? OutputPaths.DirectoryFor(ifcPath) : Path.Combine(projectRoot, "Resultados"));
         Directory.CreateDirectory(logDirectory);
         lastLogPath = Path.Combine(logDirectory, $"Grelha_{DateTime.Now:yyyyMMdd_HHmmss_fff}_{Environment.ProcessId}.log");
         File.WriteAllText(lastLogPath, $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} Programa iniciado. Versão {Version}.{Environment.NewLine}", Encoding.UTF8);
-
-        var defaultFile = Environment.GetEnvironmentVariable("GRELHA_DEFAULT_IFC") ?? Path.GetFullPath(Path.Combine(projectRoot, "..", "IFC", "786-INC-PRE-0000-MOD-GERL-AC-MODELO_IFC-00.ifc"));
-        ifcPath = args.FirstOrDefault(File.Exists) ?? (File.Exists(defaultFile) ? defaultFile : "");
 
         Text = $"Dimensionador Tipo Grelha {Version}";
         StartPosition = FormStartPosition.CenterScreen;
@@ -69,8 +68,10 @@ internal sealed class MainWindow : Form
     private void MapData()
     {
         if (web.CoreWebView2 is null || ifcPath.Length == 0) return;
+        var results = OutputPaths.DirectoryFor(ifcPath);
+        Directory.CreateDirectory(results);
         web.CoreWebView2.ClearVirtualHostNameToFolderMapping("dados.grelha");
-        web.CoreWebView2.SetVirtualHostNameToFolderMapping("dados.grelha", Path.GetDirectoryName(ifcPath)!, CoreWebView2HostResourceAccessKind.Allow);
+        web.CoreWebView2.SetVirtualHostNameToFolderMapping("dados.grelha", results, CoreWebView2HostResourceAccessKind.Allow);
     }
 
     private string? DataBase() => ifcPath.Length == 0 ? null : "https://dados.grelha/" + Uri.EscapeDataString(Path.GetFileNameWithoutExtension(ifcPath));
@@ -89,17 +90,19 @@ internal sealed class MainWindow : Form
         switch (S("cmd"))
         {
             case "ready":
-                Post(new { type = "init", version = Version, path = ifcPath, memorial = HasMemorial(), @base = File.Exists(Path.ChangeExtension(ifcPath, ".network-3d.json")) ? DataBase() : null });
+                Post(new { type = "init", version = Version, path = ifcPath, memorial = HasMemorial(), @base = NetworkIsCurrent() ? DataBase() : null });
                 break;
             case "browse":
                 using (var dialog = new OpenFileDialog { Title = "Selecionar modelo IFC", Filter = "Modelos IFC (*.ifc;*.ifczip)|*.ifc;*.ifczip|Todos os arquivos (*.*)|*.*", CheckFileExists = true })
                 {
                     if (File.Exists(ifcPath)) dialog.FileName = ifcPath;
                     if (dialog.ShowDialog(this) != DialogResult.OK) break;
+                    WriteSessionLog($"Modelo IFC selecionado: {dialog.FileName}");
                     ifcPath = dialog.FileName;
+                    StartSessionLog();
                     MapData();
                     Post(new { type = "file", path = ifcPath, memorial = HasMemorial() });
-                    if (File.Exists(Path.ChangeExtension(ifcPath, ".network-3d.json"))) Post(new { type = "done", @base = DataBase() });
+                    if (NetworkIsCurrent()) Post(new { type = "done", @base = DataBase() });
                     else _ = RunReaderAsync("", "", null, geometryOnly: true);
                 }
                 break;
@@ -121,7 +124,7 @@ internal sealed class MainWindow : Form
                 break;
             case "analyzeAuto":
                 // Área mais desfavorável: critérios gravados ao lado do IFC; o leitor calcula as candidatas e grava a escolhida.
-                var criteriaFile = Path.ChangeExtension(ifcPath, ".area-criteria.json");
+                var criteriaFile = OutputPaths.FileFor(ifcPath, ".area-criteria.json");
                 await File.WriteAllTextAsync(criteriaFile, m.GetProperty("area").GetRawText(), Encoding.UTF8);
                 await RunReaderAsync(S("source"), S("tank"), null, criteriaFile);
                 useChosenArea = true;
@@ -138,11 +141,11 @@ internal sealed class MainWindow : Form
         }
     }
 
-    private string AreaFile() => Path.ChangeExtension(ifcPath, ".operation-area.json");
+    private string AreaFile() => OutputPaths.FileFor(ifcPath, ".operation-area.json");
 
     private async Task SelectPumpAsync(string? initialPumpId)
     {
-        var csv = Path.ChangeExtension(ifcPath, ".pump-selection.csv");
+        var csv = OutputPaths.FileFor(ifcPath, ".pump-selection.csv");
         var catalogJson = new[] { Path.Combine(AppContext.BaseDirectory, "Leitor", "Catalogo", "bombas_incendio.json"), Path.Combine(projectRoot, "Catalogo", "bombas_incendio.json") }
             .FirstOrDefault(File.Exists);
         if (!File.Exists(csv) || catalogJson is null)
@@ -150,7 +153,7 @@ internal sealed class MainWindow : Form
             MessageBox.Show(this, catalogJson is null ? "Catálogo de bombas (bombas_incendio.json) não encontrado." : "Analise o IFC antes de selecionar a bomba.", "Seleção de bomba", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
-        using var form = new PumpSelectionForm(csv, catalogJson, Path.ChangeExtension(ifcPath, ".system-curve.csv"), string.IsNullOrEmpty(initialPumpId) ? null : initialPumpId);
+        using var form = new PumpSelectionForm(csv, catalogJson, OutputPaths.FileFor(ifcPath, ".system-curve.csv"), string.IsNullOrEmpty(initialPumpId) ? null : initialPumpId);
         if (form.ShowDialog(this) != DialogResult.OK || form.SelectedPumpId is not { } id) return;
         Post(new { type = "pumpChosen", id });
         await RunReaderAsync("", "", id);
@@ -205,8 +208,7 @@ internal sealed class MainWindow : Form
             Post(new { type = "busy", on = false });
             if (exitCode != 0) { Post(new { type = "status", text = $"A análise terminou com erro ({exitCode}). Veja a saída e o log." }); return; }
             Post(new { type = "done", @base = DataBase() });
-            if (geometryOnly) Post(new { type = "status", text = "IFC carregado. Preencha os critérios e clique em Analisar para dimensionar." });
-            else if (memorialPumpId is null) Post(new { type = "status", text = $"Análise concluída às {DateTime.Now:HH:mm}." });
+            if (!geometryOnly && memorialPumpId is null) Post(new { type = "status", text = $"Análise concluída às {DateTime.Now:HH:mm}." });
             else
             {
                 var memorial = LatestMemorial(startedAt);
@@ -225,7 +227,7 @@ internal sealed class MainWindow : Form
     }
 
     private FileInfo? LatestMemorial(DateTime? since = null) => ifcPath.Length == 0 ? null
-        : new DirectoryInfo(Path.GetDirectoryName(ifcPath)!).GetFiles("Memorial_Calculo_*.docx")
+        : new DirectoryInfo(OutputPaths.DirectoryFor(ifcPath)).GetFiles("Memorial_Calculo_*.docx")
             .Where(file => since is null || file.LastWriteTime >= since.Value.AddSeconds(-2)).OrderByDescending(file => file.LastWriteTime).FirstOrDefault();
 
     private void OpenOutput(string kind)
@@ -240,7 +242,7 @@ internal sealed class MainWindow : Form
             "pipes" => ".hydraulic-pipes.csv", "inventory" => ".inventory.json", "pumpcurve" => ".pump-curve.csv", _ => null
         };
         if (extension is null) return;
-        var path = Path.ChangeExtension(ifcPath, extension);
+        var path = OutputPaths.FileFor(ifcPath, extension);
         if (kind == "pumpcurve" && !File.Exists(path)) File.WriteAllText(path, "Flow_l_s,Head_m" + Environment.NewLine, Encoding.UTF8);
         if (File.Exists(path)) Shell(path); else Post(new { type = "status", text = "Arquivo ainda não gerado; analise o IFC." });
     }
@@ -253,6 +255,42 @@ internal sealed class MainWindow : Form
 
     private void WriteSessionLog(string message) =>
         File.AppendAllText(lastLogPath, $"{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss zzz} {message}{Environment.NewLine}", Encoding.UTF8);
+
+    // A rede 3D salva só é reaproveitada se foi gerada a partir deste mesmo IFC (tamanho e data gravados nela);
+    // um IFC substituído com o mesmo nome, ou uma rede de versão antiga sem o carimbo, pede nova leitura.
+    private bool NetworkIsCurrent()
+    {
+        if (ifcPath.Length == 0 || !File.Exists(ifcPath)) return false;
+        var file = OutputPaths.PathFor(ifcPath, ".network-3d.json");
+        if (!File.Exists(file)) return false;
+        try
+        {
+            using var stream = File.OpenRead(file);
+            using var json = JsonDocument.Parse(stream);
+            var root = json.RootElement;
+            var ifc = new FileInfo(ifcPath);
+            return root.TryGetProperty("IfcLength", out var length) && length.GetInt64() == ifc.Length
+                && root.TryGetProperty("IfcModifiedUtc", out var modified)
+                && Math.Abs((modified.GetDateTime().ToUniversalTime() - ifc.LastWriteTimeUtc).TotalSeconds) < 2;
+        }
+        catch (Exception error) when (error is JsonException or IOException or InvalidOperationException or FormatException) { return false; }
+    }
+
+    private void StartSessionLog()
+    {
+        logDirectory = OutputPaths.DirectoryFor(ifcPath);
+        Directory.CreateDirectory(logDirectory);
+        var path = Path.Combine(logDirectory, Path.GetFileName(lastLogPath));
+        if (!string.Equals(lastLogPath, path, StringComparison.OrdinalIgnoreCase))
+        {
+            // Leva o log desta sessão para a pasta do novo IFC; se ainda não existe log, ou já há um com o mesmo nome lá,
+            // a sessão só continua no novo caminho (sem erro ao trocar de arquivo).
+            try { if (File.Exists(lastLogPath) && !File.Exists(path)) File.Move(lastLogPath, path); }
+            catch (IOException) { }
+            lastLogPath = path;
+        }
+        WriteSessionLog($"Modelo IFC selecionado: {ifcPath}");
+    }
 
     private void StopChildProcess()
     {

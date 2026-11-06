@@ -61,6 +61,7 @@ const up = new THREE.Vector3(0, 1, 0);
 let objects = [];      // { mesh, kind, data, baseColor }
 let selected = null;
 let ifcGeometry = null; // Map GlobalId → BufferGeometry (geometria original do IFC, em metros relativos à rede)
+let ifcGeometryBase = null; // resultado (base) ao qual a geometria carregada pertence
 
 const RAMP = [[0, 0x2f6fde], [0.33, 0x1fb3a5], [0.66, 0xf2c230], [1, 0xd8342b]];
 function ramp(t) {
@@ -578,14 +579,28 @@ function pumpsTable() {
 }
 
 async function loadResults(base) {
-  const sameModel = state.dataBase === base;
   state.dataBase = base;
   try {
     const r = await fetch(`${base}.network-3d.json?t=${Date.now()}`); if (!r.ok) throw new Error("sem rede 3D");
     state.network = await r.json();
-    if (!sameModel) { ifcGeometry = null; build(state.network); ifcGeometry = await loadIfcGeometry(base, state.network.Origin); }
+    // Mostra primeiro a rede simplificada (rápido) e depois troca pela geometria original do IFC, lida em seguida
+    // (com cache local): a leitura do IFC não atrasa a primeira exibição.
+    const sameModel = ifcGeometryBase === base && ifcGeometry;
+    if (!sameModel) ifcGeometry = null;
     build(state.network);
-  } catch { state.network = null; }
+    if (!sameModel) setTimeout(async () => {
+      const geometry = await loadIfcGeometry(base, state.network.Origin);
+      if (!geometry || state.dataBase !== base || !state.network) return;
+      ifcGeometry = geometry; ifcGeometryBase = base; build(state.network);
+    }, 50);
+    $("status").textContent = `Rede exibida: ${state.network.Pipes.length} tubos e ${state.network.Sprinklers.length} sprinklers.`;
+  } catch (error) {
+    state.network = null;
+    $("vazio3d").hidden = false;
+    const message = `Não foi possível exibir a rede: ${error.message}`;
+    $("status").textContent = message;
+    log(message);
+  }
   try { const r = await fetch(`${base}.pump-selection.csv?t=${Date.now()}`); state.pumps = r.ok ? parseCsv(await r.text()) : []; } catch { state.pumps = []; }
   state.selectedPumpId = state.pumps.find((p) => p.Atende === "Sim")?.Id ?? null;
   try {
