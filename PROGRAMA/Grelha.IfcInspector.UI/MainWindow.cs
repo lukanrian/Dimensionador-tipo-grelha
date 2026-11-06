@@ -10,7 +10,7 @@ namespace Grelha.IfcInspector.UI;
 // Janela principal: interface web (painel, visualizador 3D da rede) numa WebView2; o cálculo roda no leitor (processo separado).
 internal sealed class MainWindow : Form
 {
-    private const string Version = "0.45";
+    private const string Version = "0.46";
     private readonly WebView2 web = new() { Dock = DockStyle.Fill };
     private readonly string projectRoot;
     private readonly string cliProject;
@@ -90,7 +90,7 @@ internal sealed class MainWindow : Form
         switch (S("cmd"))
         {
             case "ready":
-                Post(new { type = "init", version = Version, path = ifcPath, memorial = HasMemorial(), @base = NetworkIsCurrent() ? DataBase() : null });
+                Post(new { type = "init", version = Version, path = ifcPath, @base = NetworkIsCurrent() ? DataBase() : null });
                 break;
             case "browse":
                 using (var dialog = new OpenFileDialog { Title = "Selecionar modelo IFC", Filter = "Modelos IFC (*.ifc;*.ifczip)|*.ifc;*.ifczip|Todos os arquivos (*.*)|*.*", CheckFileExists = true })
@@ -101,16 +101,12 @@ internal sealed class MainWindow : Form
                     ifcPath = dialog.FileName;
                     StartSessionLog();
                     MapData();
-                    Post(new { type = "file", path = ifcPath, memorial = HasMemorial() });
+                    Post(new { type = "file", path = ifcPath });
                     if (NetworkIsCurrent()) Post(new { type = "done", @base = DataBase() });
                     else _ = RunReaderAsync("", "", null, geometryOnly: true);
                 }
                 break;
             case "analyze":
-                await RunReaderAsync(S("source"), S("tank"), null);
-                break;
-            case "analyzeMemorial":
-                useChosenArea = false;
                 await RunReaderAsync(S("source"), S("tank"), null);
                 break;
             case "memorial":
@@ -158,11 +154,6 @@ internal sealed class MainWindow : Form
         Post(new { type = "pumpChosen", id });
         await RunReaderAsync("", "", id);
     }
-
-    // Memorial do projeto (PDF com MEM e SPK no nome) ao lado do IFC, o mesmo critério do leitor.
-    private bool HasMemorial() => Path.GetDirectoryName(ifcPath) is { } folder && Directory.Exists(folder)
-        && Directory.GetFiles(folder, "*.pdf").Any(file => Path.GetFileName(file).Contains("MEM", StringComparison.OrdinalIgnoreCase)
-            && Path.GetFileName(file).Contains("SPK", StringComparison.OrdinalIgnoreCase));
 
     private async Task RunReaderAsync(string source, string tank, string? memorialPumpId, string? autoAreaCriteria = null, bool geometryOnly = false)
     {

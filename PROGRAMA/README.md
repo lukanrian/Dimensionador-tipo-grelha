@@ -1,4 +1,4 @@
-# Dimensionador Tipo Grelha 0.45
+# Dimensionador Tipo Grelha 0.46
 
 ## Organização das pastas
 
@@ -156,6 +156,19 @@ O 3D usa a biblioteca camera-controls 2.9.0 (MIT, em `Web/lib`) com a mesma conf
   fora da área não contam). As propriedades de cada elemento dizem como ele foi ligado e a distância. Confira antes de aceitar o resultado.
 - **Solucionador esparso:** o sistema de cada iteração é resolvido por gradiente conjugado com matriz esparsa; acabou o limite de
   4.000 nós da matriz densa. No IFC modelo o resultado é o mesmo da versão anterior (17,27 L/s; 53,06 m).
+
+## Cálculo só pelo IFC e pela norma (0.46)
+
+- O programa lê o IFC inteiro e faz a conta. O memorial PDF do projeto não entra mais no cálculo: serve só de referência
+  para conferir o resultado.
+- **Fator K:** lido de cada bico no IFC (nome do tipo, nome ou ObjectType, como "Sprinkler DN 15 - K80"); pode variar
+  de bico para bico. O campo K da janela vale só para bico sem K no IFC. A pressão mínima de cada área usa o bico de menor K.
+- **Densidade e área de operação:** escolhida a classificação de risco, vêm da NBR 10897, Figura 42 (ponto de maior densidade):
+  leve 4,1 mm/min e 140 m²; ordinário I 6,1 e 140; ordinário II 8,1 e 140; extraordinário I 12,2 e 230; extraordinário II 16,3 e 230.
+  Os valores continuam editáveis.
+- **Área por bico:** pelo espaçamento medido no IFC (NBR 10897), salvo se informada.
+- **Pressão mínima:** a maior entre a da densidade e 48 kPa (NBR 10897, 9.4.4.10).
+- **Perdas localizadas:** tabela de comprimentos equivalentes da literatura técnica (NBR 10897, 9.4.3.4).
 
 ## Revisão de robustez (0.45)
 

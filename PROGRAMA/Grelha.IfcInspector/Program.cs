@@ -351,8 +351,21 @@ try
     }
     var sprinklerAnchors = sprinklers.Where(item => item.ObjectPlacement is not null)
         .Select(item => (Item: item, Point: Origin(item))).ToList();
-    var memorialSource = geometryOnly ? null : ReadMemorial(Path.GetDirectoryName(input)!);
-    var memorial = memorialSource?.Data;
+    // Fator K de cada bico lido do IFC (nome do tipo, nome ou ObjectType, ex.: "Sprinkler - DN 15 - Fator K 80 - Pendente");
+    // o K informado na janela só vale para bicos sem K no IFC.
+    var kRegex = new System.Text.RegularExpressions.Regex(@"(?:Fator\s*K|\bK)\s*[-=:]?\s*(\d{2,3}(?:[.,]\d+)?)\b", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+    var ifcK = sprinklers.ToDictionary(item => Id(item), item => new[] { TypeName(item), item.Name?.ToString(), item.ObjectType?.ToString() }
+        .Select(text => text is null ? null : kRegex.Match(text)).Where(match => match is { Success: true })
+        .Select(match => (double?)ParseDecimal(match!.Groups[1].Value)).FirstOrDefault(), StringComparer.Ordinal);
+    double KOf(string id, double fallback) => ifcK.GetValueOrDefault(id) ?? fallback;
+    if (!geometryOnly)
+    {
+        var withK = ifcK.Values.Count(value => value is not null);
+        await LogAsync($"Fator K lido do IFC em {withK} de {ifcK.Count} bicos ({string.Join("; ", ifcK.Values.Where(v => v is not null).GroupBy(v => v).Select(g => $"K {g.Key:0.#} × {g.Count()}"))}).");
+    }
+    // O memorial PDF do projeto não entra no cálculo: serve só de referência para conferir o resultado. Critérios pela NBR 10897.
+    (string Path, MemorialData Data)? memorialSource = null;
+    MemorialData? memorial = null;
     // Área de operação escolhida na janela (modo 2D): substitui a tabela de bicos do memorial; o memorial PDF, se houver, só fornece os comprimentos equivalentes.
     var areaMode = areaOption is not null;
     if (areaMode)
@@ -364,7 +377,7 @@ try
         var chosen = sprinklerAnchors.Where(anchor => ids.Contains(Id(anchor.Item))).OrderByDescending(anchor => Math.Round(anchor.Point.Y)).ThenBy(anchor => anchor.Point.X).ToArray();
         if (chosen.Length == 0) throw new InvalidDataException("Nenhum bico da área escolhida existe na rede Sprinklers do IFC.");
         var k = AreaNumber("K", 80);
-        var heads = chosen.Select((anchor, index) => new MemorialSprinkler(index + 1, anchor.Point.X, anchor.Point.Y, 15, k, double.NaN, double.NaN)).ToArray();
+        var heads = chosen.Select((anchor, index) => new MemorialSprinkler(index + 1, anchor.Point.X, anchor.Point.Y, 15, KOf(Id(anchor.Item), k), double.NaN, double.NaN)).ToArray();
         memorial = new MemorialData(area.TryGetProperty("Name", out var name) ? name.GetString() ?? "Área escolhida" : "Área escolhida", "Hazen-Williams",
             AreaNumber("Density_mm_min", 6.1), AreaNumber("DesignArea_m2", 140), heads.Length, k, AreaNumber("MinimumPressure_mca", 0),
             double.NaN, double.NaN, double.NaN, double.NaN, heads, memorial?.EquivalentLengths ?? [],
@@ -1016,9 +1029,11 @@ try
                         operationSprinklers.Select(h => h.IfcGlobalId).ToArray(), 0, 0));
                 if (candidates.Count == 0) throw new InvalidDataException("Não foi possível montar áreas de operação candidatas (pavimentos sem bicos suficientes ou sem ramais identificados).");
                 var pool = candidates.SelectMany(candidate => candidate.HeadIds).Distinct(StringComparer.Ordinal)
-                    .Select((id, index) => new HydraulicSprinkler(id, index + 1, kAuto, sprinklerAnchors.First(anchor => Id(anchor.Item) == id).Point)).ToArray();
-                // Pressão mínima de cada área: a maior entre a informada, a da densidade (Q = densidade × área ÷ bicos da área) e 48 kPa.
-                double TargetFor(AreaCandidate candidate) => Math.Max(Math.Max(minimumAuto, Math.Pow(density * designArea / candidate.HeadIds.Length / kAuto, 2) / 0.0980665), 48 / 9.80665);
+                    .Select((id, index) => new HydraulicSprinkler(id, index + 1, KOf(id, kAuto), sprinklerAnchors.First(anchor => Id(anchor.Item) == id).Point)).ToArray();
+                // Pressão mínima de cada área: a maior entre a informada, a da densidade (Q = densidade × área ÷ bicos da área, no bico de menor K)
+                // e 48 kPa (NBR 10897, 9.4.4.10).
+                double TargetFor(AreaCandidate candidate) => Math.Max(Math.Max(minimumAuto,
+                    Math.Pow(density * designArea / candidate.HeadIds.Length / candidate.HeadIds.Min(id => KOf(id, kAuto)), 2) / 0.0980665), 48 / 9.80665);
                 var autoTarget = TargetFor(candidates[0]);
                 await LogAsync($"Área automática: {candidates.Count} áreas candidatas em {candidates.Select(c => c.Storey).Distinct().Count()} pavimento(s).");
                 var evaluation = Hydraulics.Solve(new HydraulicInput(hydraulicPipes, hydraulicDevices, pool, unitsPerMeter, autoTarget, rejected, sourcePipeOption, null, tankLevelOption,
@@ -1035,11 +1050,11 @@ try
                 }, new JsonSerializerOptions { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
                 var chosen = worst.HeadIds.Select(id => sprinklerAnchors.First(anchor => Id(anchor.Item) == id))
                     .OrderByDescending(anchor => Math.Round(anchor.Point.Y)).ThenBy(anchor => anchor.Point.X).ToArray();
-                var autoHeads = chosen.Select((anchor, index) => new MemorialSprinkler(index + 1, anchor.Point.X, anchor.Point.Y, 15, kAuto, double.NaN, double.NaN)).ToArray();
+                var autoHeads = chosen.Select((anchor, index) => new MemorialSprinkler(index + 1, anchor.Point.X, anchor.Point.Y, 15, KOf(Id(anchor.Item), kAuto), double.NaN, double.NaN)).ToArray();
                 var risk = criteria.TryGetProperty("RiskClass", out var riskValue) ? riskValue.GetString() ?? "" : memorial.RiskClass;
                 memorial = new MemorialData($"Área mais desfavorável – {worst.Storey} ({autoHeads.Length} bicos)", "Hazen-Williams", density, designArea, autoHeads.Length, kAuto,
                     minimumAuto, double.NaN, double.NaN, double.NaN, double.NaN, autoHeads, memorial.EquivalentLengths, risk);
-                hydraulicHeads = chosen.Select((anchor, index) => new HydraulicSprinkler(Id(anchor.Item), index + 1, kAuto, anchor.Point)).ToArray();
+                hydraulicHeads = chosen.Select((anchor, index) => new HydraulicSprinkler(Id(anchor.Item), index + 1, KOf(Id(anchor.Item), kAuto), anchor.Point)).ToArray();
                 // A área escolhida passa a ser a área do projeto (mesmo arquivo da escolha manual no 2D).
                 await File.WriteAllTextAsync(OutputPaths.FileFor(input, ".operation-area.json"), JsonSerializer.Serialize(new
                 {
@@ -1049,7 +1064,8 @@ try
             }
             // Pressão mínima: maior entre a do memorial e a que garante a densidade (Q = densidade × área / bicos).
             var densityFlow_l_min = memorial.Density_mm_min * memorial.DesignArea_m2 / memorial.SprinklerCount;
-            densityPressure_mca = Math.Pow(densityFlow_l_min / memorial.KFactor_l_min_bar_sqrt, 2) / 0.0980665;
+            var smallestK = memorial.Sprinklers.Length > 0 ? memorial.Sprinklers.Min(head => head.K) : memorial.KFactor_l_min_bar_sqrt;
+            densityPressure_mca = Math.Pow(densityFlow_l_min / smallestK, 2) / 0.0980665;
             // NBR 10897, 9.4.4.10: nenhum chuveiro abaixo de 48 kPa.
             var target = Math.Max(Math.Max(memorial.MinimumSprinklerPressure_mca, densityPressure_mca.Value), 48 / 9.80665);
             catalogPath = PumpSelection.Find(Path.GetDirectoryName(input)!);
@@ -1345,7 +1361,7 @@ try
     {
         Console.WriteLine($"Cálculo hidráulico (Hazen-Williams, topologia automática): vazão total {hydraulic.TotalFlow_l_s:0.00} l/s ({hydraulic.TotalFlow_l_s * 60:0} l/min); pressão mínima nos bicos {hydraulic.MinimumSprinklerPressure_mca:0.00} m.c.a. (exigida {hydraulic.TargetMinimumPressure_mca:0.00}); pressão na alimentação {hydraulic.SourcePressure_mca:0.00} m.c.a. na cota {hydraulic.SourceElevation_m:0.00} m (tubo {hydraulic.SourcePipeId}).");
         if (hydraulic.Pump is { } pumpResult)
-            Console.WriteLine($"Bomba ({pumpResult.Mode}): {pumpResult.Flow_l_s:0.00} l/s; altura manométrica {pumpResult.Head_m:0.00} m; recalque {pumpResult.DischargePressure_mca:0.00} m.c.a. na cota {pumpResult.DischargeElevation_m:0.00} m; sucção {pumpResult.SuctionPressure_mca:0.00} m.c.a. Memorial: {memorial!.DesignFlow_l_s:0.00} l/s; {memorial.PumpHead_mca:0.00} m.");
+            Console.WriteLine($"Bomba ({pumpResult.Mode}): {pumpResult.Flow_l_s:0.00} l/s; altura manométrica {pumpResult.Head_m:0.00} m; recalque {pumpResult.DischargePressure_mca:0.00} m.c.a. na cota {pumpResult.DischargeElevation_m:0.00} m; sucção {pumpResult.SuctionPressure_mca:0.00} m.c.a.");
         if (selection.Length > 0)
         {
             Console.WriteLine($"Seleção de bombas (NBR 16704): {selection.Count(item => item.Meets)} de {selection.Length} bombas do catálogo atendem. Lista: {pumpSelectionPath}");
@@ -1353,7 +1369,7 @@ try
                 Console.WriteLine($"  {item.Pump.Id} {item.Pump.Description}: {item.Result.Flow_l_s * 3.6:0.0} m³/h a {item.Result.Head_m:0.0} m; menor pressão nos bicos {item.Result.MinimumSprinklerPressure_mca:0.00} m.c.a.");
         }
         if (memorialDocumentPath is not null) Console.WriteLine($"Memorial de cálculo gerado: {memorialDocumentPath}");
-        Console.WriteLine($"Memorial: vazão {memorial!.SprinklerFlowSum_l_s:0.00} l/s. Resultados por bico: {hydraulicSprinklersPath}; por tubo: {hydraulicPipesPath}");
+        Console.WriteLine($"Resultados por bico: {hydraulicSprinklersPath}; por tubo: {hydraulicPipesPath}");
         foreach (var warning in hydraulic.Warnings) Console.WriteLine($"Aviso: {warning}");
     }
     Console.WriteLine($"Ligações candidatas: {candidatePipeContacts} contatos tubo-tubo; {candidatePipeProximities} proximidades tubo-tubo; {candidateFittingLinks} tubo-conexão; {candidateSprinklerLinks} tubo-sprinkler.");

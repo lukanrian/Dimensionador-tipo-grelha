@@ -463,9 +463,12 @@ function areaChanged() {
   updateAreaActions();
   shapeCheck();
 }
+// NBR 10897, Figura 42 (curvas de densidade e área): ponto de maior densidade de cada classificação de risco.
+const RISCO = { "risco leve": [4.1, 140], "risco ordinário grupo I": [6.1, 140], "risco ordinário grupo II": [8.1, 140],
+  "risco extraordinário grupo I": [12.2, 230], "risco extraordinário grupo II": [16.3, 230] };
 function validAreaCriteria() {
-  const required = ["aDensidade", "aArea", "aK"].every((id) => num($(id).value) > 0) && $("aRisco").value !== "";
-  const optional = ["aPressao", "aPorBico"].every((id) => !$(id).value.trim() || num($(id).value) > 0);
+  const required = ["aDensidade", "aArea"].every((id) => num($(id).value) > 0) && $("aRisco").value !== "";
+  const optional = ["aK", "aPressao", "aPorBico"].every((id) => !$(id).value.trim() || num($(id).value) > 0);
   return required && optional;
 }
 function updateAreaActions() {
@@ -678,7 +681,11 @@ $("btnLimparArea").onclick = () => { state.area.clear(); areaChanged(); };
 $("aArea").oninput = areaChanged;
 $("aPorBico").oninput = areaChanged;
 for (const id of ["aDensidade", "aK", "aPressao"]) $(id).oninput = updateAreaActions;
-$("aRisco").onchange = updateAreaActions;
+$("aRisco").onchange = () => {
+  const ponto = RISCO[$("aRisco").value];
+  if (ponto) { $("aDensidade").value = fmt(ponto[0], 1); $("aArea").value = fmt(ponto[1], 0); }
+  areaChanged(); updateAreaActions();
+};
 $("btnAutoArea").onclick = () => {
   if (!requireAreaCriteria()) return;
   const { SprinklerIds, Name, ...criteria } = areaPayload();
@@ -686,7 +693,6 @@ $("btnAutoArea").onclick = () => {
   areaSource();
   send({ cmd: "analyzeAuto", area: criteria, ...runArgs() });
 };
-$("btnMemorialArea").onclick = () => send({ cmd: "analyzeMemorial", ...runArgs() });
 $("btnCalcArea").onclick = () => requireAreaCriteria() && state.area.size && send({ cmd: "analyzeArea", area: areaPayload(), ...runArgs() });
 $("colorir").onchange = () => { recolor(); applyVisibility(); };
 for (const id of ["vConexoes", "vValvulas", "vBicos", "vSemVazao"]) $(id).onchange = applyVisibility;
@@ -704,7 +710,6 @@ try { if (localStorage.getItem("grelha.tema") === "escuro") { document.documentE
 function log(line) { const s = $("saida"); s.textContent += line + "\n"; s.scrollTop = s.scrollHeight; }
 host?.addEventListener("message", (e) => {
   const m = e.data;
-  if (m.type === "init" || m.type === "file") $("btnMemorialArea").hidden = !m.memorial;
   if (m.type === "init") { $("versao").textContent = `versão ${m.version} · sprinklers · cálculo + bomba + memorial`; setFile(m.path); setAreaMode(); if (m.base) loadResults(m.base); }
   else if (m.type === "file") { setFile(m.path); state.network = null; state.pumps = []; state.dataBase = ""; ifcGeometry = null; state.area.clear(); world.clear(); objects = []; batch = null; $("vazio3d").hidden = false; summary(); pumpsTable(); updateButtons(); setAreaMode(); }
   else if (m.type === "log") log(m.line);
