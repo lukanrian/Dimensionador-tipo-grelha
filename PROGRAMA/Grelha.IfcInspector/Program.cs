@@ -531,6 +531,7 @@ try
             DeadEnds = Array.Empty<object>()
         };
         await File.WriteAllTextAsync(OutputPaths.FileFor(input, ".network-3d.json"), JsonSerializer.Serialize(network));
+        Console.WriteLine("[rede-3d-pronta]");
         await WriteNetworkIfcAsync();
         await LogAsync($"Visualização rápida pronta: {pipes.Count} tubos, {fittings.Count} conexões e {sprinklerAnchors.Count} sprinklers.");
         return 0;
@@ -1154,6 +1155,7 @@ try
                         .Select(item => new { item.Id, P = Xyz(item.Point) })
                 };
                 await File.WriteAllTextAsync(OutputPaths.FileFor(input, ".network-3d.json"), JsonSerializer.Serialize(network, new JsonSerializerOptions { NumberHandling = System.Text.Json.Serialization.JsonNumberHandling.AllowNamedFloatingPointLiterals }));
+                Console.WriteLine("[rede-3d-pronta]");
                 await WriteNetworkIfcAsync();
 
             }

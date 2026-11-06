@@ -10,7 +10,7 @@ namespace Grelha.IfcInspector.UI;
 // Janela principal: interface web (painel, visualizador 3D da rede) numa WebView2; o cálculo roda no leitor (processo separado).
 internal sealed class MainWindow : Form
 {
-    private const string Version = "0.47";
+    private const string Version = "0.48";
     private readonly WebView2 web = new() { Dock = DockStyle.Fill };
     private readonly string projectRoot;
     private readonly string cliProject;
@@ -59,7 +59,9 @@ internal sealed class MainWindow : Form
         core.Settings.AreDevToolsEnabled = Environment.GetEnvironmentVariable("GRELHA_DEVTOOLS") == "1";
         core.Settings.IsStatusBarEnabled = false;
         core.SetVirtualHostNameToFolderMapping("app.grelha", Path.Combine(AppContext.BaseDirectory, "Web"), CoreWebView2HostResourceAccessKind.Allow);
-        MapData();
+        // Resultados (https://dados.grelha/...) servidos pela janela a partir da pasta Resultados do IFC aberto.
+        core.AddWebResourceRequestedFilter("https://dados.grelha/*", CoreWebView2WebResourceContext.All);
+        core.WebResourceRequested += ServeData;
         core.WebMessageReceived += async (_, e) =>
         {
             // IFC arrastado para a janela: a página manda o arquivo junto da mensagem e o caminho vem do WebView2.
@@ -74,14 +76,30 @@ internal sealed class MainWindow : Form
         core.Navigate("https://app.grelha/index.html");
     }
 
-    // A pasta do IFC fica acessível à página como https://dados.grelha/ (resultados .json/.csv).
+    // A página lê os resultados em https://dados.grelha/<arquivo>. A janela responde cada pedido com o arquivo da pasta Resultados
+    // do IFC aberto no momento. (O mapeamento de pasta do WebView2 não valia quando o programa abria sem IFC e o IFC vinha depois.)
+    private void ServeData(object? sender, CoreWebView2WebResourceRequestedEventArgs e)
+    {
+        var core = web.CoreWebView2;
+        var name = Uri.UnescapeDataString(new Uri(e.Request.Uri).AbsolutePath.TrimStart('/'));
+        var file = ifcPath.Length == 0 || name.Length == 0 || name.Contains('/') || name.Contains('\\') || name.Contains("..")
+            ? null : Path.Combine(OutputPaths.DirectoryFor(ifcPath), name);
+        if (file is null || !File.Exists(file))
+        {
+            e.Response = core.Environment.CreateWebResourceResponse(null, 404, "Not Found", "Access-Control-Allow-Origin: *");
+            return;
+        }
+        var info = new FileInfo(file);
+        var type = Path.GetExtension(file).ToLowerInvariant() switch { ".json" => "application/json", ".csv" => "text/csv; charset=utf-8", _ => "application/octet-stream" };
+        var headers = $"Content-Type: {type}\r\nContent-Length: {info.Length}\r\nLast-Modified: {info.LastWriteTimeUtc:R}\r\nCache-Control: no-store\r\n"
+            + "Access-Control-Allow-Origin: *\r\nAccess-Control-Expose-Headers: Last-Modified, Content-Length";
+        Stream? body = e.Request.Method == "HEAD" ? null : new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        e.Response = core.Environment.CreateWebResourceResponse(body, 200, "OK", headers);
+    }
+
     private void MapData()
     {
-        if (web.CoreWebView2 is null || ifcPath.Length == 0) return;
-        var results = OutputPaths.DirectoryFor(ifcPath);
-        Directory.CreateDirectory(results);
-        web.CoreWebView2.ClearVirtualHostNameToFolderMapping("dados.grelha");
-        web.CoreWebView2.SetVirtualHostNameToFolderMapping("dados.grelha", results, CoreWebView2HostResourceAccessKind.Allow);
+        if (ifcPath.Length > 0) Directory.CreateDirectory(OutputPaths.DirectoryFor(ifcPath));
     }
 
     private string? DataBase() => ifcPath.Length == 0 ? null : "https://dados.grelha/" + Uri.EscapeDataString(Path.GetFileNameWithoutExtension(ifcPath));
@@ -100,7 +118,6 @@ internal sealed class MainWindow : Form
             Post(new { type = "status", text = "Aguarde a análise em andamento terminar para abrir outro IFC." });
             return;
         }
-        WriteSessionLog($"Modelo IFC selecionado: {path}");
         ifcPath = path;
         StartSessionLog();
         MapData();
@@ -117,7 +134,10 @@ internal sealed class MainWindow : Form
         switch (S("cmd"))
         {
             case "ready":
-                Post(new { type = "init", version = Version, path = ifcPath, @base = NetworkIsCurrent() ? DataBase() : null });
+                var current = NetworkIsCurrent();
+                Post(new { type = "init", version = Version, path = ifcPath, @base = current ? DataBase() : null });
+                // Programa aberto já com um IFC ainda não lido (atalho, arquivo solto sobre o executável): faz a leitura rápida para exibir a rede.
+                if (!current && File.Exists(ifcPath)) { MapData(); _ = RunReaderAsync("", "", null, geometryOnly: true); }
                 break;
             case "browse":
                 using (var dialog = new OpenFileDialog { Title = "Selecionar modelo IFC", Filter = "Modelos IFC (*.ifc;*.ifczip)|*.ifc;*.ifczip|Todos os arquivos (*.*)|*.*", CheckFileExists = true })
@@ -207,7 +227,13 @@ internal sealed class MainWindow : Form
         try
         {
             activeProcess = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-            activeProcess.OutputDataReceived += (_, e) => { if (!string.IsNullOrWhiteSpace(e.Data)) Post(new { type = "log", line = e.Data }); };
+            activeProcess.OutputDataReceived += (_, e) =>
+            {
+                if (string.IsNullOrWhiteSpace(e.Data)) return;
+                // O leitor avisa quando a rede 3D já foi gravada: a página mostra a rede sem esperar o resto (IFC da rede, planilhas).
+                if (e.Data == "[rede-3d-pronta]") { Post(new { type = "done", @base = DataBase() }); return; }
+                Post(new { type = "log", line = e.Data });
+            };
             activeProcess.ErrorDataReceived += (_, e) => { if (!string.IsNullOrWhiteSpace(e.Data)) Post(new { type = "log", line = e.Data }); };
             activeProcess.Start();
             activeProcess.BeginOutputReadLine();

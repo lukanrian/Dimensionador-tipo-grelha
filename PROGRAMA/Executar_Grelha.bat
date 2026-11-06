@@ -1,6 +1,6 @@
 @echo off
 setlocal
-title Iniciando Dimensionador Tipo Grelha 0.47
+title Iniciando Dimensionador Tipo Grelha 0.48
 
 rem Pasta do programa (PROGRAMA); os dados (IFC, normas, catálogo em PDF) ficam na pasta acima.
 set "APP_ROOT=%~dp0"
@@ -12,7 +12,7 @@ set "GRELHA_PROJECT_ROOT=%APP_ROOT%"
 set "GRELHA_DEFAULT_IFC=%DATA_ROOT%\IFC\786-INC-PRE-0000-MOD-GERL-AC-MODELO_IFC-00.ifc"
 set "GRELHA_CLI_PROJECT=%APP_ROOT%\Grelha.IfcInspector\Grelha.IfcInspector.csproj"
 
-echo Compilando Dimensionador Tipo Grelha 0.47...
+echo Compilando Dimensionador Tipo Grelha 0.48...
 dotnet build "%UI_PROJECT%" --configuration Release
 if errorlevel 1 (
     echo.

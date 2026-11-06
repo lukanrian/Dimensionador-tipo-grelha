@@ -1,4 +1,4 @@
-# Dimensionador Tipo Grelha 0.47
+# Dimensionador Tipo Grelha 0.48
 
 ## Organização das pastas
 
@@ -156,6 +156,14 @@ O 3D usa a biblioteca camera-controls 2.9.0 (MIT, em `Web/lib`) com a mesma conf
   fora da área não contam). As propriedades de cada elemento dizem como ele foi ligado e a distância. Confira antes de aceitar o resultado.
 - **Solucionador esparso:** o sistema de cada iteração é resolvido por gradiente conjugado com matriz esparsa; acabou o limite de
   4.000 nós da matriz densa. No IFC modelo o resultado é o mesmo da versão anterior (17,27 L/s; 53,06 m).
+
+## Rede visível ao abrir o IFC (0.48)
+
+- Corrigido o erro "Não foi possível exibir a rede: Failed to fetch": os resultados passam a ser entregues à página pela própria
+  janela (pasta Resultados do IFC aberto), em vez do mapeamento de pasta do WebView2, que não valia quando o programa abria sem IFC.
+- Ao abrir um IFC (botão, arrastando para a janela ou abrindo o programa com o arquivo), a rede aparece assim que a leitura
+  termina, sem esperar o IFC da rede e as planilhas; depois é trocada pela geometria original do IFC.
+- Abrir o programa já com um IFC ainda não lido agora dispara a leitura rápida (antes ficava vazio).
 
 ## Arrastar o IFC para a janela (0.47)
 
